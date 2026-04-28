@@ -54,7 +54,7 @@ RemotePlayerManager.prototype._onRemoteAdded = function (data) {
   remote.model.material = material;
 
   remote.setPosition(data.x, data.y, data.z);
-  remote.setEulerAngles(0, data.yaw || 0, 0);
+  remote.setEulerAngles(0, (typeof data.rotY === "number" ? data.rotY : (data.yaw || 0)), 0);
 
   this.app.root.addChild(remote);
   this.remoteEntities[data.sessionId] = remote;
@@ -76,7 +76,7 @@ RemotePlayerManager.prototype._onRemoteUpdated = function (data) {
   }
 
   remote.setPosition(data.x, data.y, data.z);
-  remote.setEulerAngles(0, data.yaw || 0, 0);
+  remote.setEulerAngles(0, (typeof data.rotY === "number" ? data.rotY : (data.yaw || 0)), 0);
 };
 
 RemotePlayerManager.prototype._onRemoteRemoved = function (data) {

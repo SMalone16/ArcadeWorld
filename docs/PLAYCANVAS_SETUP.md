@@ -63,6 +63,7 @@ For local server use `ws://localhost:2567`.
 - If no connection: verify `SERVER_URL` is `wss://` and Codespaces port 2567 is visible.
 - If scripts fail: verify Colyseus client script loaded first.
 - If local player does not move: confirm keyboard focus is on the game iframe/tab.
+- If you see `[ArcadeNetworkClient] Connection failed` with `Cannot read properties of undefined (reading 'onAdd')`: this means `room.state.players` is missing on the client. Re-upload the latest `ArcadeNetworkClient.js` (which guards before binding listeners) and confirm your server room calls `this.setState(new ArcadeWorldState())` and initializes `players` as a `MapSchema`.
 
 ## TODO (future)
 

@@ -6,6 +6,9 @@ import { Schema, type } from "@colyseus/schema";
  */
 export class PlayerState extends Schema {
   @type("string")
+  id = "";
+
+  @type("string")
   name = "Player";
 
   @type("number")
@@ -18,5 +21,5 @@ export class PlayerState extends Schema {
   z = 0;
 
   @type("number")
-  yaw = 0;
+  rotY = 0;
 }

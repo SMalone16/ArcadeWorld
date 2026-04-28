@@ -54,7 +54,20 @@ ArcadeNetworkClient.prototype._connect = async function () {
     console.log("[ArcadeNetworkClient] Connected", this.sessionId);
     this._emit("connected", { sessionId: this.sessionId });
 
+    console.log("[ArcadeNetworkClient] room.state after join", this.room.state);
+    console.log(
+      "[ArcadeNetworkClient] room.state.players exists:",
+      !!(this.room.state && this.room.state.players)
+    );
+
     this._bindStateListeners();
+
+    this.room.onStateChange(function () {
+      if (!this._hasBoundPlayers && this.room && this.room.state && this.room.state.players) {
+        console.log("[ArcadeNetworkClient] players map appeared after state patch; binding listeners now.");
+        this._bindStateListeners();
+      }
+    }.bind(this));
 
     this.room.onLeave((code) => {
       console.warn("[ArcadeNetworkClient] Left room", code);
@@ -72,34 +85,51 @@ ArcadeNetworkClient.prototype._connect = async function () {
 ArcadeNetworkClient.prototype._bindStateListeners = function () {
   var self = this;
 
+  if (!this.room || !this.room.state || !this.room.state.players) {
+    console.warn("[ArcadeNetworkClient] Cannot bind players listeners; room.state.players is missing.");
+    return;
+  }
+
+  if (this._hasBoundPlayers) {
+    return;
+  }
+
+  this._hasBoundPlayers = true;
+
   this.room.state.players.onAdd(function (player, sessionId) {
+    console.log("[ArcadeNetworkClient] player added", sessionId, player);
+
     self._emit("remoteAdded", {
       sessionId: sessionId,
+      id: player.id,
       x: player.x,
       y: player.y,
       z: player.z,
-      yaw: player.yaw,
+      rotY: typeof player.rotY === "number" ? player.rotY : (player.yaw || 0),
       name: player.name
     });
 
     player.onChange(function () {
+      console.log("[ArcadeNetworkClient] player changed", sessionId, player);
       self._emit("remoteUpdated", {
         sessionId: sessionId,
+        id: player.id,
         x: player.x,
         y: player.y,
         z: player.z,
-        yaw: player.yaw,
+        rotY: typeof player.rotY === "number" ? player.rotY : (player.yaw || 0),
         name: player.name
       });
     });
   });
 
   this.room.state.players.onRemove(function (_player, sessionId) {
+    console.log("[ArcadeNetworkClient] player removed", sessionId);
     self._emit("remoteRemoved", { sessionId: sessionId });
   });
 };
 
-ArcadeNetworkClient.prototype.sendMove = function (position, yaw, name) {
+ArcadeNetworkClient.prototype.sendMove = function (position, rotY, name) {
   if (!this.room) {
     return;
   }
@@ -108,7 +138,8 @@ ArcadeNetworkClient.prototype.sendMove = function (position, yaw, name) {
     x: position.x,
     y: position.y,
     z: position.z,
-    yaw: yaw,
+    rotY: rotY,
+    yaw: rotY,
     name: name
   });
 };
