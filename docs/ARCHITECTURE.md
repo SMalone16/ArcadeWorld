@@ -1,41 +1,44 @@
-# Architecture
+# Arcade World Architecture (Current Slice)
 
-## High-Level Layers
+## High-level split
 
-1. **Game Shell (`src/game`)**
-   - Bootstraps PlayCanvas app.
-   - Owns lifecycle, scene wiring, and update loop.
-2. **Scene Layer (`src/scenes`)**
-   - Builds lobby geometry/entities.
-3. **Entity Layer (`src/entities`)**
-   - Reusable gameplay entities and interfaces.
-4. **Mini-game Layer (`src/minigames`)**
-   - Registry and mini-game modules.
-5. **Network Layer (`src/network`)**
-   - Swappable network client abstraction.
-6. **UI Layer (`src/ui`)**
-   - HUD and prompts independent from scene generation.
+- **PlayCanvas Editor project:** owns visual scene/map/lights/layout.
+- **Repo `/client-scripts`:** reusable runtime logic scripts attached in PlayCanvas.
+- **Repo `/server`:** Colyseus authoritative room state server.
 
-## Separation Rules
+This separation keeps networking logic out of scene-authoring concerns.
 
-- Rendering/scene code should not directly embed transport-specific networking logic.
-- Cabinets reference mini-game IDs; IDs resolve through registry.
-- Keep future server implementation independent from static client hosting.
+## Server responsibilities (`/server`)
 
-## Future Server Integration
+- Host room `arcade_lobby`
+- Track connected players in room state
+- Accept movement updates (`move` message)
+- Sync x/y/z (+ yaw) to all clients
+- Remove players on disconnect
 
-A future `ColyseusNetworkClient` can replace `LocalMockNetworkClient` in one place (`createNetworkClient`).
+## Client script responsibilities (`/client-scripts`)
 
+- `ArcadeConfig.js`: endpoint and room configuration
+- `ArcadeNetworkClient.js`: connect/join + state event fan-out
+- `LocalPlayerController.js`: read WASD input and send movement
+- `RemotePlayerManager.js`: create/update/remove placeholder remote avatars
 
-## Practical Notes for Team Onboarding
+## Why this helps students
 
-- `LobbyScene` now reads cabinet spawn data from `src/scenes/lobbyLayout.ts`; keep this data-driven pattern for future portals/NPC spawns.
-- `PlayerController` input handling uses named PlayCanvas key constants; continue this style to avoid magic-number drift.
-- Keep mini-game loading behind the mini-game registry; avoid cabinet-side logic branching on game-specific behavior.
-- If real-time state sync expands, introduce dedicated replicated state models (e.g., `src/network/state`) before wiring server payloads into scene entities.
+- Each script has one clear purpose.
+- Easy to reason about and debug.
+- Easy to replace placeholder parts later.
 
-## Known Risks (Pre-Multiplayer)
+## Explicit non-goals for this slice
 
-1. **Bundle growth risk**: importing many mini-games directly into the registry will increase initial load size.
-2. **Scene coupling risk**: directly mutating entities from many systems can become hard to reason about.
-3. **Input/state mixing risk**: local input and future remote snapshots should remain separated in controller/update flow.
+- Ticket economy
+- Shop mechanics
+- Arcade cabinet mini-game launch integration
+- Hide & Seek rules
+
+## Future expansion TODO
+
+- Move server to dedicated production hosting.
+- Add authentication and moderation.
+- Add interpolation/smoothing and anti-cheat validation.
+- Add mini-game room transitions.
