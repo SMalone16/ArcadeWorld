@@ -6,6 +6,7 @@ type MovementMessage = {
   x: number;
   y: number;
   z: number;
+  rotY?: number;
   yaw?: number;
   name?: string;
 };
@@ -39,8 +40,15 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
       player.y = message.y;
       player.z = message.z;
 
-      if (typeof message.yaw === "number" && Number.isFinite(message.yaw)) {
-        player.yaw = message.yaw;
+      const rotY =
+        typeof message.rotY === "number"
+          ? message.rotY
+          : typeof message.yaw === "number"
+            ? message.yaw
+            : undefined;
+
+      if (typeof rotY === "number" && Number.isFinite(rotY)) {
+        player.rotY = rotY;
       }
 
       if (typeof message.name === "string" && message.name.trim().length > 0) {
@@ -57,11 +65,12 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
 
   onJoin(client: Client): void {
     const player = new PlayerState();
+    player.id = client.sessionId;
     player.name = `Player-${client.sessionId.slice(0, 4)}`;
     player.x = Math.random() * 4 - 2;
     player.y = 0;
     player.z = Math.random() * 4 - 2;
-    player.yaw = 0;
+    player.rotY = 0;
 
     this.state.players.set(client.sessionId, player);
     console.log(`[LobbyRoom] join ${client.sessionId}`);
