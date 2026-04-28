@@ -2,6 +2,7 @@ import { Color, Entity, StandardMaterial, Vec3 } from 'playcanvas';
 import { GAME_CONFIG } from '../game/config';
 import { ArcadeCabinet } from '../entities/ArcadeCabinet';
 import type { Interactable } from '../entities/Interactable';
+import { LOBBY_CABINET_LAYOUT } from './lobbyLayout';
 
 interface LobbySceneContext {
   app: import('playcanvas').AppBase;
@@ -56,15 +57,7 @@ export class LobbyScene {
   }
 
   private addCabinets(): void {
-    const cabinetData: Array<{ id: string; miniGameId: string; position: [number, number, number] }> = [
-      { id: 'cab-1', miniGameId: 'example-mini-game', position: [-8, 1.3, -6] },
-      { id: 'cab-2', miniGameId: 'example-mini-game', position: [-4, 1.3, -6] },
-      { id: 'cab-3', miniGameId: 'example-mini-game', position: [0, 1.3, -6] },
-      { id: 'cab-4', miniGameId: 'example-mini-game', position: [4, 1.3, -6] },
-      { id: 'cab-5', miniGameId: 'example-mini-game', position: [8, 1.3, -6] }
-    ];
-
-    cabinetData.forEach((entry) => {
+    LOBBY_CABINET_LAYOUT.forEach((entry) => {
       const cabinet = new ArcadeCabinet(entry.id, entry.miniGameId, entry.position);
       this.interactables.push(cabinet);
       this.root.addChild(cabinet.entity);

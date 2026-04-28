@@ -1,4 +1,4 @@
-import { Entity, Vec3 } from 'playcanvas';
+import { Entity, KEY_A, KEY_D, KEY_S, KEY_W, Vec3 } from 'playcanvas';
 import { GAME_CONFIG } from '../game/config';
 
 export class PlayerController {
@@ -21,10 +21,10 @@ export class PlayerController {
       return;
     }
 
-    if (keyboard.isPressed(87)) this.moveDir.z -= 1; // W
-    if (keyboard.isPressed(83)) this.moveDir.z += 1; // S
-    if (keyboard.isPressed(65)) this.moveDir.x -= 1; // A
-    if (keyboard.isPressed(68)) this.moveDir.x += 1; // D
+    if (keyboard.isPressed(KEY_W)) this.moveDir.z -= 1;
+    if (keyboard.isPressed(KEY_S)) this.moveDir.z += 1;
+    if (keyboard.isPressed(KEY_A)) this.moveDir.x -= 1;
+    if (keyboard.isPressed(KEY_D)) this.moveDir.x += 1;
 
     if (this.moveDir.lengthSq() > 0) {
       this.moveDir.normalize().mulScalar(GAME_CONFIG.player.speed * dt);

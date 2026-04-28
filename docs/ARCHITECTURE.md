@@ -25,3 +25,17 @@
 ## Future Server Integration
 
 A future `ColyseusNetworkClient` can replace `LocalMockNetworkClient` in one place (`createNetworkClient`).
+
+
+## Practical Notes for Team Onboarding
+
+- `LobbyScene` now reads cabinet spawn data from `src/scenes/lobbyLayout.ts`; keep this data-driven pattern for future portals/NPC spawns.
+- `PlayerController` input handling uses named PlayCanvas key constants; continue this style to avoid magic-number drift.
+- Keep mini-game loading behind the mini-game registry; avoid cabinet-side logic branching on game-specific behavior.
+- If real-time state sync expands, introduce dedicated replicated state models (e.g., `src/network/state`) before wiring server payloads into scene entities.
+
+## Known Risks (Pre-Multiplayer)
+
+1. **Bundle growth risk**: importing many mini-games directly into the registry will increase initial load size.
+2. **Scene coupling risk**: directly mutating entities from many systems can become hard to reason about.
+3. **Input/state mixing risk**: local input and future remote snapshots should remain separated in controller/update flow.

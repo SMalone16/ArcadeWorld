@@ -36,6 +36,17 @@ Open the local URL shown by Vite (typically `http://localhost:5173`).
 - Mock network client abstraction for future server integration.
 - Foundational docs + Codex agent guidance.
 
+
+## Engineering Review Notes
+
+Current status after repository review:
+
+- Folder structure is clear for current scope, but scene composition can grow quickly; keep spawn/layout data in dedicated modules (`src/scenes/lobbyLayout.ts`) instead of embedding arrays directly in scene classes.
+- Networking boundaries are mostly clean (`src/network` + factory), but scene/entity code should continue avoiding direct socket/session references.
+- PlayCanvas-specific setup is still centralized in scene/entity classes; as complexity grows, prefer lightweight factory/helper modules for reusable materials and primitive builders.
+- GitHub Pages deployment remains realistic for the client, but multiplayer must stay in a separate service as documented in `docs/DEPLOYMENT.md`.
+- Build currently succeeds, but production bundle size is large (~1.9 MB minified JS). Plan for code-splitting when mini-games become real modules.
+
 ## Multiplayer Plan (Future)
 
 - Keep client as static assets deployable to GitHub Pages.
