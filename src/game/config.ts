@@ -1,9 +1,7 @@
 export const GAME_CONFIG = {
   camera: {
-    offsetX: 12,
-    offsetY: 14,
-    offsetZ: 12,
-    fov: 55
+    fov: 55,
+    lookSensitivity: 0.12
   },
   player: {
     speed: 6,
