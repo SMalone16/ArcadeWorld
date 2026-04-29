@@ -11,8 +11,8 @@ export interface PlayerPrefabOptions {
  */
 export function createPlayerPrefab(options: PlayerPrefabOptions = {}): Entity {
   const player = new Entity(options.name ?? 'player');
-  player.addComponent('render', { type: 'capsule' });
-  player.setLocalScale(1, 1.8, 1);
+  player.addComponent('render', { type: 'box' });
+  player.setLocalScale(3, 3, 3);
 
   if (options.color) {
     const material = new StandardMaterial();

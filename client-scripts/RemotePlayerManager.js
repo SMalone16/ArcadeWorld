@@ -46,7 +46,8 @@ RemotePlayerManager.prototype._onRemoteAdded = function (data) {
   }
 
   var remote = new pc.Entity("Remote_" + data.sessionId);
-  remote.addComponent("model", { type: "capsule" });
+  remote.addComponent("model", { type: "box" });
+  remote.setLocalScale(3, 3, 3);
 
   var material = new pc.StandardMaterial();
   material.diffuse = this.avatarColor.clone();

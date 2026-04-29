@@ -13,7 +13,7 @@ export class LobbyScene {
   public readonly playersRoot = new Entity('players-root');
   public readonly interactables: Interactable[] = [];
   public readonly camera: Entity;
-  public readonly defaultSpawnPoint = new Vec3(0, 0.9, 4);
+  public readonly defaultSpawnPoint = new Vec3(0, 1.6, 4);
 
   public constructor(private readonly context: LobbySceneContext) {
     this.camera = this.createCamera();
