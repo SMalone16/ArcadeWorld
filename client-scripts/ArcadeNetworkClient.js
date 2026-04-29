@@ -60,6 +60,11 @@ ArcadeNetworkClient.prototype._connect = async function () {
       !!(this.room.state && this.room.state.players)
     );
 
+    if (!this.room || !this.room.state) {
+      console.error("[ArcadeNetworkClient] joinOrCreate resolved but room/state missing.");
+      return;
+    }
+
     this._bindStateListeners();
 
     this.room.onStateChange(function () {
@@ -78,6 +83,18 @@ ArcadeNetworkClient.prototype._connect = async function () {
       console.error("[ArcadeNetworkClient] Room error", code, message);
     });
   } catch (err) {
+    var hasRoom = !!this.room;
+    var hasState = !!(this.room && this.room.state);
+    var hasPlayers = !!(this.room && this.room.state && this.room.state.players);
+
+    if (!hasPlayers) {
+      console.error("[ArcadeNetworkClient] Connection failed: missing state.players", {
+        hasRoom: hasRoom,
+        hasState: hasState
+      }, err);
+      return;
+    }
+
     console.error("[ArcadeNetworkClient] Connection failed", err);
   }
 };
@@ -85,8 +102,23 @@ ArcadeNetworkClient.prototype._connect = async function () {
 ArcadeNetworkClient.prototype._bindStateListeners = function () {
   var self = this;
 
-  if (!this.room || !this.room.state || !this.room.state.players) {
-    console.warn("[ArcadeNetworkClient] Cannot bind players listeners; room.state.players is missing.");
+  if (!this.room || !this.room.state) {
+    console.error("[ArcadeNetworkClient] Cannot bind state listeners: room or room.state is missing.");
+    return;
+  }
+
+  if (!this.room.state.players) {
+    var stateKeys = Object.keys(this.room.state || {});
+    console.error("[ArcadeNetworkClient] Cannot bind players listeners: missing state.players. Available state keys:", stateKeys);
+
+    if (!this._hasRetriedBind) {
+      this._hasRetriedBind = true;
+      setTimeout(function () {
+        console.warn("[ArcadeNetworkClient] Retrying players listener bind on next tick.");
+        this._bindStateListeners();
+      }.bind(this), 0);
+    }
+
     return;
   }
 
