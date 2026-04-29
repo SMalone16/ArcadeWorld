@@ -22,7 +22,7 @@ This separation keeps networking logic out of render-only scene scripts.
 - `entities/PlayerPrefab.ts`: reusable player entity factory used for local and remote players.
 - `network/LocalMockNetworkClient.ts`: join flow picks free spawn transforms (random from free points), applies consistent initial rotation, falls back to farthest/round-robin when saturated, stores `clientId -> Entity`, and despawns on leave/disconnect.
 - `entities/PlayerController.ts`: local input and camera follow for the local player's entity.
-- `game/ArcadeGame.ts`: orchestration only; requests joins and reads local player entity from the network layer.
+- `game/ArcadeGame.ts`: orchestration only; requests joins, reads local player entity from the network layer, and sends local-authoritative transform snapshots at a fixed rate with threshold guardrails.
 
 ## Why this helps students
 
@@ -41,5 +41,5 @@ This separation keeps networking logic out of render-only scene scripts.
 
 - Move server to dedicated production hosting.
 - Add authentication and moderation.
-- Add interpolation/smoothing and anti-cheat validation.
+- Add anti-cheat validation.
 - Add mini-game room transitions.
