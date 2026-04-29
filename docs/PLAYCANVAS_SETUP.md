@@ -48,6 +48,11 @@ For local server use `ws://localhost:2567`.
 1. Create an empty entity (example: `NetworkManager`).
 2. Attach `ArcadeNetworkClient.js` script.
 3. Attach `RemotePlayerManager.js` script.
+4. In `ArcadeNetworkClient` attributes:
+   - set `serverUrl` (or keep empty and provide `window.ArcadeConfig.SERVER_URL`).
+   - set `roomName` (or keep empty and provide `window.ArcadeConfig.ROOM_NAME`).
+   - assign `playerTemplate` to your player prefab/template entity (**required**).
+   - optionally assign `remotePlayerManagerEntity` and `localPlayerEntity` for easier runtime diagnostics.
 4. In `RemotePlayerManager` attributes:
    - set `networkClientEntity` to this same `NetworkManager` entity.
 

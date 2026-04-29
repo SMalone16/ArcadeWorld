@@ -16,6 +16,21 @@ ArcadeNetworkClient.attributes.add("roomName", {
   description: "Leave empty to use window.ArcadeConfig.ROOM_NAME"
 });
 
+ArcadeNetworkClient.attributes.add("playerTemplate", {
+  type: "entity",
+  title: "Player Prefab/Template (optional)"
+});
+
+ArcadeNetworkClient.attributes.add("remotePlayerManagerEntity", {
+  type: "entity",
+  title: "Remote Player Manager Entity (optional)"
+});
+
+ArcadeNetworkClient.attributes.add("localPlayerEntity", {
+  type: "entity",
+  title: "Local Player Entity (optional)"
+});
+
 /**
  * Minimal event-based wrapper around Colyseus.
  * Other scripts (LocalPlayerController, RemotePlayerManager) subscribe to events.
@@ -36,8 +51,43 @@ ArcadeNetworkClient.prototype.initialize = function () {
   var cfg = window.ArcadeConfig || {};
   this._serverUrl = this.serverUrl || cfg.SERVER_URL || "ws://localhost:2567";
   this._roomName = this.roomName || cfg.ROOM_NAME || "arcade_lobby";
+  this._resolvedPlayerTemplate = this.playerTemplate || null;
+  this._resolvedRemotePlayerManagerEntity = this.remotePlayerManagerEntity || null;
+  this._resolvedLocalPlayerEntity = this.localPlayerEntity || null;
+
+  console.log("[ArcadeNetworkClient] Resolved attributes", {
+    serverUrl: this._serverUrl,
+    roomName: this._roomName,
+    hasPlayerTemplate: !!this._resolvedPlayerTemplate,
+    hasRemotePlayerManagerEntity: !!this._resolvedRemotePlayerManagerEntity,
+    hasLocalPlayerEntity: !!this._resolvedLocalPlayerEntity
+  });
+
+  this._validateRequiredAttributes();
 
   this._connect();
+};
+
+ArcadeNetworkClient.prototype._validateRequiredAttributes = function () {
+  var missing = [];
+
+  if (!this._serverUrl || !String(this._serverUrl).trim()) {
+    missing.push("serverUrl (or window.ArcadeConfig.SERVER_URL)");
+  }
+
+  if (!this._roomName || !String(this._roomName).trim()) {
+    missing.push("roomName (or window.ArcadeConfig.ROOM_NAME)");
+  }
+
+  if (!this._resolvedPlayerTemplate) {
+    missing.push("playerTemplate (assign your player prefab/template entity)");
+  }
+
+  if (missing.length > 0) {
+    var message = "[ArcadeNetworkClient] Missing required attributes: " + missing.join(", ") + ". Fix the script attributes on this entity before launch.";
+    console.error(message);
+    throw new Error(message);
+  }
 };
 
 ArcadeNetworkClient.prototype._connect = async function () {
