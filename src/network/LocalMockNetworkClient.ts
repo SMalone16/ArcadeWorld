@@ -1,11 +1,12 @@
 import { Color, Entity, Vec3 } from 'playcanvas';
 import { createPlayerPrefab } from '../entities/PlayerPrefab';
-import type { INetworkClient, NetworkJoinContext } from '../game/types';
+import type { INetworkClient, NetworkJoinContext, SpawnTransform } from '../game/types';
 
 interface MockClientState {
   id: string;
   color?: Color;
   position: Vec3;
+  rotationEuler: Vec3;
   isOwner?: boolean;
 }
 
@@ -13,6 +14,7 @@ export class LocalMockNetworkClient implements INetworkClient {
   private snapshotHandler: ((snapshot: unknown) => void) | null = null;
   private rootEntity: Entity | null = null;
   private clientPlayerMap = new Map<string, Entity>();
+  private spawnJoinCounter = 0;
 
   public async connect(): Promise<void> {
     console.log('[Network:Mock] connect');
@@ -27,12 +29,15 @@ export class LocalMockNetworkClient implements INetworkClient {
     console.log(`[Network:Mock] joinLobby ${lobbyId}`);
     this.rootEntity = context.playersRoot;
 
+    const localSpawn = this.pickSpawnTransform(context.spawnTransforms);
+    const remoteSpawn = this.pickSpawnTransform(context.spawnTransforms);
+
     const mockClients: MockClientState[] = [
-      { id: context.localClientId, position: context.spawnPoint.clone(), isOwner: true },
-      { id: 'mock-client-2', color: new Color(0.8, 0.3, 0.3), position: context.spawnPoint.clone().add(new Vec3(2, 0, -2)) }
+      { id: context.localClientId, position: localSpawn.position.clone(), rotationEuler: localSpawn.rotationEuler.clone(), isOwner: true },
+      { id: 'mock-client-2', color: new Color(0.8, 0.3, 0.3), position: remoteSpawn.position.clone(), rotationEuler: remoteSpawn.rotationEuler.clone() }
     ];
 
-    mockClients.forEach((client) => this.spawnPlayerForClient(client.id, client.position, client.color, client.isOwner === true));
+    mockClients.forEach((client) => this.spawnPlayerForClient(client.id, client.position, client.rotationEuler, client.color, client.isOwner === true));
   }
 
   public async leaveLobby(): Promise<void> {
@@ -60,13 +65,14 @@ export class LocalMockNetworkClient implements INetworkClient {
     this.snapshotHandler?.(snapshot);
   }
 
-  private spawnPlayerForClient(clientId: string, position: Vec3, color?: Color, isOwner = false): Entity | null {
+  private spawnPlayerForClient(clientId: string, position: Vec3, rotationEuler: Vec3, color?: Color, isOwner = false): Entity | null {
     if (!this.rootEntity || this.clientPlayerMap.has(clientId)) {
       return null;
     }
 
     const entity = createPlayerPrefab({ name: `player-${clientId}`, color, isOwner });
     entity.setPosition(position.x, position.y, position.z);
+    entity.setEulerAngles(rotationEuler.x, rotationEuler.y, rotationEuler.z);
     this.rootEntity.addChild(entity);
     this.clientPlayerMap.set(clientId, entity);
     return entity;
@@ -86,5 +92,42 @@ export class LocalMockNetworkClient implements INetworkClient {
     for (const clientId of this.clientPlayerMap.keys()) {
       this.despawnPlayerForClient(clientId);
     }
+  }
+
+  private pickSpawnTransform(spawnTransforms: SpawnTransform[]): SpawnTransform {
+    if (spawnTransforms.length === 0) {
+      return { position: new Vec3(0, 1.6, 4), rotationEuler: new Vec3(0, 180, 0) };
+    }
+
+    const occupied = Array.from(this.clientPlayerMap.values()).map((entity) => entity.getPosition().clone());
+    const freeTransforms = spawnTransforms.filter((spawn) => !occupied.some((pos) => pos.distance(spawn.position) < 0.75));
+
+    if (freeTransforms.length > 0) {
+      const randomIndex = Math.floor(Math.random() * freeTransforms.length);
+      return freeTransforms[randomIndex];
+    }
+
+    if (occupied.length > 0) {
+      const farthest = spawnTransforms.reduce((best, candidate) => {
+        const nearestOccupiedDistance = occupied.reduce((nearest, occupiedPos) => {
+          const distance = occupiedPos.distance(candidate.position);
+          return Math.min(nearest, distance);
+        }, Number.POSITIVE_INFINITY);
+
+        if (!best || nearestOccupiedDistance > best.nearestOccupiedDistance) {
+          return { spawn: candidate, nearestOccupiedDistance };
+        }
+
+        return best;
+      }, null as { spawn: SpawnTransform; nearestOccupiedDistance: number } | null);
+
+      if (farthest) {
+        return farthest.spawn;
+      }
+    }
+
+    const index = this.spawnJoinCounter % spawnTransforms.length;
+    this.spawnJoinCounter += 1;
+    return spawnTransforms[index];
   }
 }
