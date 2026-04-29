@@ -7,6 +7,10 @@ import { createNetworkClient } from '../network/NetworkClient';
 import type { Interactable } from '../entities/Interactable';
 
 export class ArcadeGame {
+  private static readonly TRANSFORM_SEND_HZ = 15;
+  private static readonly POSITION_SEND_THRESHOLD = 0.02;
+  private static readonly ROTATION_SEND_THRESHOLD_DEGREES = 1.5;
+
   private readonly app: Application;
   private readonly lobbyScene: LobbyScene;
   private playerController: PlayerController | null = null;
@@ -14,6 +18,9 @@ export class ArcadeGame {
   private readonly networkClient = createNetworkClient();
   private readonly localClientId = 'local-client-1';
   private nearbyInteractable: Interactable | null = null;
+  private sendAccumulator = 0;
+  private lastSentPosition: { x: number; y: number; z: number } | null = null;
+  private lastSentRotation: { x: number; y: number; z: number } | null = null;
 
   public constructor(private readonly canvas: HTMLCanvasElement, private readonly uiContainer: HTMLElement) {
     this.app = new Application(canvas, {
@@ -34,6 +41,7 @@ export class ArcadeGame {
   public async start(): Promise<void> {
     await this.networkClient.connect();
     await this.networkClient.joinLobby('default-lobby', {
+      app: this.app,
       localClientId: this.localClientId,
       playersRoot: this.lobbyScene.playersRoot,
       spawnTransforms: this.lobbyScene.getSpawnTransforms()
@@ -50,7 +58,8 @@ export class ArcadeGame {
 
     this.app.on('update', (dt: number) => {
       this.playerController?.update(dt);
-      this.syncLocalPlayerState();
+      this.sendAccumulator += dt;
+      this.syncLocalPlayerStateAtFixedTick();
       this.updateInteractionState();
 
       const keyboard = this.app.keyboard;
@@ -62,7 +71,13 @@ export class ArcadeGame {
     this.app.start();
   }
 
-  private syncLocalPlayerState(): void {
+  private syncLocalPlayerStateAtFixedTick(): void {
+    const tickIntervalSeconds = 1 / ArcadeGame.TRANSFORM_SEND_HZ;
+    if (this.sendAccumulator < tickIntervalSeconds) {
+      return;
+    }
+    this.sendAccumulator -= tickIntervalSeconds;
+
     const localPlayer = this.networkClient.getPlayerEntity(this.localClientId);
     if (!localPlayer) {
       return;
@@ -70,11 +85,29 @@ export class ArcadeGame {
 
     const position = localPlayer.getPosition();
     const rotation = localPlayer.getEulerAngles();
+    const nextPosition = { x: position.x, y: position.y, z: position.z };
+    const nextRotation = { x: rotation.x, y: rotation.y, z: rotation.z };
+
+    const positionChanged = !this.lastSentPosition || this.distanceBetween(nextPosition, this.lastSentPosition) >= ArcadeGame.POSITION_SEND_THRESHOLD;
+    const rotationChanged = !this.lastSentRotation || this.distanceBetween(nextRotation, this.lastSentRotation) >= ArcadeGame.ROTATION_SEND_THRESHOLD_DEGREES;
+
+    if (!positionChanged && !rotationChanged) {
+      return;
+    }
 
     this.networkClient.sendInput({
-      position: { x: position.x, y: position.y, z: position.z },
-      rotation: { x: rotation.x, y: rotation.y, z: rotation.z }
+      position: nextPosition,
+      rotation: nextRotation
     });
+    this.lastSentPosition = nextPosition;
+    this.lastSentRotation = nextRotation;
+  }
+
+  private distanceBetween(a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): number {
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+    const dz = a.z - b.z;
+    return Math.hypot(dx, dy, dz);
   }
 
   private updateInteractionState(): void {

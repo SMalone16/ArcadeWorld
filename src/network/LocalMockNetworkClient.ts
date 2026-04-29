@@ -1,4 +1,4 @@
-import { Color, Entity, Vec3 } from 'playcanvas';
+import { AppBase, Color, Entity, Vec3 } from 'playcanvas';
 import { createPlayerPrefab } from '../entities/PlayerPrefab';
 import type { INetworkClient, NetworkJoinContext, SpawnTransform } from '../game/types';
 
@@ -10,10 +10,22 @@ interface MockClientState {
   isOwner?: boolean;
 }
 
+interface ProxySnapshot {
+  position: Vec3;
+  rotationEuler: Vec3;
+  timestampMs: number;
+}
+
 export class LocalMockNetworkClient implements INetworkClient {
+  private static readonly INTERPOLATION_BACK_TIME_MS = 120;
+  private static readonly MAX_PROXY_BUFFER_LENGTH = 30;
   private snapshotHandler: ((snapshot: unknown) => void) | null = null;
   private rootEntity: Entity | null = null;
   private clientPlayerMap = new Map<string, Entity>();
+  private proxySnapshotBuffers = new Map<string, ProxySnapshot[]>();
+  private updateHandler: ((dt: number) => void) | null = null;
+  private boundApp: AppBase | null = null;
+  private localClientId = '';
   private spawnJoinCounter = 0;
 
   public async connect(): Promise<void> {
@@ -28,6 +40,8 @@ export class LocalMockNetworkClient implements INetworkClient {
   public async joinLobby(lobbyId: string, context: NetworkJoinContext): Promise<void> {
     console.log(`[Network:Mock] joinLobby ${lobbyId}`);
     this.rootEntity = context.playersRoot;
+    this.boundApp = context.app;
+    this.localClientId = context.localClientId;
 
     const localSpawn = this.pickSpawnTransform(context.spawnTransforms);
     const remoteSpawn = this.pickSpawnTransform(context.spawnTransforms);
@@ -38,15 +52,50 @@ export class LocalMockNetworkClient implements INetworkClient {
     ];
 
     mockClients.forEach((client) => this.spawnPlayerForClient(client.id, client.position, client.rotationEuler, client.color, client.isOwner === true));
+
+    if (this.boundApp && !this.updateHandler) {
+      this.updateHandler = () => this.interpolateRemotePlayers();
+      this.boundApp.on('update', this.updateHandler);
+    }
   }
 
   public async leaveLobby(): Promise<void> {
+    if (this.boundApp && this.updateHandler) {
+      this.boundApp.off('update', this.updateHandler);
+      this.updateHandler = null;
+    }
+
     this.despawnAllPlayers();
+    this.proxySnapshotBuffers.clear();
+    this.boundApp = null;
     console.log('[Network:Mock] leaveLobby');
   }
 
   public sendInput(input: Record<string, unknown>): void {
-    console.log('[Network:Mock] sendInput', input);
+    const positionInput = input.position as { x: number; y: number; z: number } | undefined;
+    const rotationInput = input.rotation as { x: number; y: number; z: number } | undefined;
+    if (!positionInput || !rotationInput) {
+      return;
+    }
+
+    // Simple playtest authority model: local movement is authoritative, then broadcast.
+    // For mock mode we forward to remote proxies to exercise smoothing behavior.
+    const simulatedRemote = this.clientPlayerMap.get('mock-client-2');
+    if (simulatedRemote) {
+      const remoteSnapshot: ProxySnapshot = {
+        position: new Vec3(positionInput.x + 1.5, positionInput.y, positionInput.z + 0.5),
+        rotationEuler: new Vec3(rotationInput.x, rotationInput.y + 15, rotationInput.z),
+        timestampMs: performance.now()
+      };
+      this.pushProxySnapshot('mock-client-2', remoteSnapshot);
+    }
+
+    this.snapshotHandler?.({
+      type: 'transform',
+      clientId: this.localClientId,
+      position: positionInput,
+      rotation: rotationInput
+    });
   }
 
   public onSnapshot(handler: (snapshot: unknown) => void): void {
@@ -75,6 +124,9 @@ export class LocalMockNetworkClient implements INetworkClient {
     entity.setEulerAngles(rotationEuler.x, rotationEuler.y, rotationEuler.z);
     this.rootEntity.addChild(entity);
     this.clientPlayerMap.set(clientId, entity);
+    if (!isOwner) {
+      this.proxySnapshotBuffers.set(clientId, [{ position: position.clone(), rotationEuler: rotationEuler.clone(), timestampMs: performance.now() }]);
+    }
     return entity;
   }
 
@@ -86,6 +138,7 @@ export class LocalMockNetworkClient implements INetworkClient {
 
     entity.destroy();
     this.clientPlayerMap.delete(clientId);
+    this.proxySnapshotBuffers.delete(clientId);
   }
 
   private despawnAllPlayers(): void {
@@ -129,5 +182,43 @@ export class LocalMockNetworkClient implements INetworkClient {
     const index = this.spawnJoinCounter % spawnTransforms.length;
     this.spawnJoinCounter += 1;
     return spawnTransforms[index];
+  }
+
+  private pushProxySnapshot(clientId: string, snapshot: ProxySnapshot): void {
+    const buffer = this.proxySnapshotBuffers.get(clientId) ?? [];
+    buffer.push(snapshot);
+
+    if (buffer.length > LocalMockNetworkClient.MAX_PROXY_BUFFER_LENGTH) {
+      buffer.splice(0, buffer.length - LocalMockNetworkClient.MAX_PROXY_BUFFER_LENGTH);
+    }
+
+    this.proxySnapshotBuffers.set(clientId, buffer);
+  }
+
+  private interpolateRemotePlayers(): void {
+    const renderTimeMs = performance.now() - LocalMockNetworkClient.INTERPOLATION_BACK_TIME_MS;
+
+    this.proxySnapshotBuffers.forEach((buffer, clientId) => {
+      const proxy = this.clientPlayerMap.get(clientId);
+      if (!proxy || buffer.length === 0) {
+        return;
+      }
+
+      while (buffer.length >= 2 && buffer[1].timestampMs <= renderTimeMs) {
+        buffer.shift();
+      }
+
+      if (buffer.length >= 2) {
+        const from = buffer[0];
+        const to = buffer[1];
+        const intervalMs = Math.max(to.timestampMs - from.timestampMs, 0.0001);
+        const t = Math.min(Math.max((renderTimeMs - from.timestampMs) / intervalMs, 0), 1);
+        proxy.setPosition(from.position.clone().lerp(from.position, to.position, t));
+        proxy.setEulerAngles(from.rotationEuler.clone().lerp(from.rotationEuler, to.rotationEuler, t));
+      } else {
+        proxy.setPosition(buffer[0].position);
+        proxy.setEulerAngles(buffer[0].rotationEuler);
+      }
+    });
   }
 }

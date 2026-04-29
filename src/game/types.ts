@@ -1,4 +1,4 @@
-import type { Entity, Vec3 } from 'playcanvas';
+import type { AppBase, Entity, Vec3 } from 'playcanvas';
 
 export interface SpawnTransform {
   position: Vec3;
@@ -18,6 +18,7 @@ export interface IMiniGame {
 }
 
 export interface NetworkJoinContext {
+  app: AppBase;
   localClientId: string;
   playersRoot: Entity;
   spawnTransforms: SpawnTransform[];
