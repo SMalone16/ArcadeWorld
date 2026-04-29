@@ -6,6 +6,7 @@ interface MockClientState {
   id: string;
   color?: Color;
   position: Vec3;
+  isOwner?: boolean;
 }
 
 export class LocalMockNetworkClient implements INetworkClient {
@@ -27,11 +28,11 @@ export class LocalMockNetworkClient implements INetworkClient {
     this.rootEntity = context.playersRoot;
 
     const mockClients: MockClientState[] = [
-      { id: context.localClientId, position: context.spawnPoint.clone() },
+      { id: context.localClientId, position: context.spawnPoint.clone(), isOwner: true },
       { id: 'mock-client-2', color: new Color(0.8, 0.3, 0.3), position: context.spawnPoint.clone().add(new Vec3(2, 0, -2)) }
     ];
 
-    mockClients.forEach((client) => this.spawnPlayerForClient(client.id, client.position, client.color));
+    mockClients.forEach((client) => this.spawnPlayerForClient(client.id, client.position, client.color, client.isOwner === true));
   }
 
   public async leaveLobby(): Promise<void> {
@@ -59,12 +60,12 @@ export class LocalMockNetworkClient implements INetworkClient {
     this.snapshotHandler?.(snapshot);
   }
 
-  private spawnPlayerForClient(clientId: string, position: Vec3, color?: Color): Entity | null {
+  private spawnPlayerForClient(clientId: string, position: Vec3, color?: Color, isOwner = false): Entity | null {
     if (!this.rootEntity || this.clientPlayerMap.has(clientId)) {
       return null;
     }
 
-    const entity = createPlayerPrefab({ name: `player-${clientId}`, color });
+    const entity = createPlayerPrefab({ name: `player-${clientId}`, color, isOwner });
     entity.setPosition(position.x, position.y, position.z);
     this.rootEntity.addChild(entity);
     this.clientPlayerMap.set(clientId, entity);

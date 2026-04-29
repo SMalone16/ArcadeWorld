@@ -12,11 +12,9 @@ export class LobbyScene {
   public readonly root = new Entity('lobby-root');
   public readonly playersRoot = new Entity('players-root');
   public readonly interactables: Interactable[] = [];
-  public readonly camera: Entity;
   public readonly defaultSpawnPoint = new Vec3(0, 1.6, 4);
 
   public constructor(private readonly context: LobbySceneContext) {
-    this.camera = this.createCamera();
   }
 
   public build(): void {
@@ -26,7 +24,6 @@ export class LobbyScene {
     this.addCabinets();
 
     this.root.addChild(this.playersRoot);
-    this.root.addChild(this.camera);
   }
 
   private addLighting(): void {
@@ -62,15 +59,6 @@ export class LobbyScene {
       this.interactables.push(cabinet);
       this.root.addChild(cabinet.entity);
     });
-  }
-
-  private createCamera(): Entity {
-    const camera = new Entity('camera');
-    camera.addComponent('camera', {
-      clearColor: new Color(0.08, 0.1, 0.14),
-      fov: GAME_CONFIG.camera.fov
-    });
-    return camera;
   }
 
   private createBox(name: string, position: Vec3, scale: Vec3, color: Color): Entity {

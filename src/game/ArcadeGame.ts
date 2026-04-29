@@ -41,11 +41,16 @@ export class ArcadeGame {
 
     const localPlayer = this.networkClient.getPlayerEntity(this.localClientId);
     if (localPlayer) {
-      this.playerController = new PlayerController(this.app, localPlayer, this.lobbyScene.camera);
+      this.playerController = new PlayerController(this.app, localPlayer);
     }
+
+    this.canvas.addEventListener('mousedown', () => {
+      this.app.mouse?.enablePointerLock();
+    });
 
     this.app.on('update', (dt: number) => {
       this.playerController?.update(dt);
+      this.syncLocalPlayerState();
       this.updateInteractionState();
 
       const keyboard = this.app.keyboard;
@@ -55,6 +60,21 @@ export class ArcadeGame {
     });
 
     this.app.start();
+  }
+
+  private syncLocalPlayerState(): void {
+    const localPlayer = this.networkClient.getPlayerEntity(this.localClientId);
+    if (!localPlayer) {
+      return;
+    }
+
+    const position = localPlayer.getPosition();
+    const rotation = localPlayer.getEulerAngles();
+
+    this.networkClient.sendInput({
+      position: { x: position.x, y: position.y, z: position.z },
+      rotation: { x: rotation.x, y: rotation.y, z: rotation.z }
+    });
   }
 
   private updateInteractionState(): void {
