@@ -48,6 +48,8 @@ ArcadeNetworkClient.prototype.initialize = function () {
   this.room = null;
   this.client = null;
   this.lastNetworkError = "";
+  this._hasObservedFirstStatePatch = false;
+  this._hasScheduledStateBindRetry = false;
 
   var cfg = window.ArcadeConfig || {};
   this._serverUrl = this.serverUrl || cfg.SERVER_URL || "ws://localhost:2567";
@@ -125,12 +127,21 @@ ArcadeNetworkClient.prototype._connect = async function () {
   console.log("room.state", this.room ? this.room.state : null);
   console.log("room.state.players", this.room && this.room.state ? this.room.state.players : null);
 
-  var didBind = this._bindStateListeners();
-  if (!didBind) {
-    console.warn("[ArcadeNetworkClient] State listeners not ready immediately after join; waiting for state updates.");
+  if (!this.room.state) {
+    console.warn("[ArcadeNetworkClient] room.state missing immediately after join; waiting for first state patch before binding listeners.");
+    this.room.onStateChange.once(function () {
+      this._hasObservedFirstStatePatch = true;
+      this._bindStateListeners();
+    }.bind(this));
+  } else {
+    var didBind = this._bindStateListeners();
+    if (!didBind) {
+      console.warn("[ArcadeNetworkClient] State listeners not ready immediately after join; waiting for state updates.");
+    }
   }
 
   this.room.onStateChange(function () {
+    this._hasObservedFirstStatePatch = true;
     if (!this._hasBoundPlayers) {
       var bound = this._bindStateListeners();
       if (!bound) {
@@ -157,12 +168,36 @@ ArcadeNetworkClient.prototype._bindStateListeners = function () {
   }
 
   if (!this.room || !this.room.state) {
-    this._setNetworkError("State binding failed: room.state is not ready yet.");
+    if (this._hasObservedFirstStatePatch) {
+      this._setNetworkError("State binding failed: room.state is not ready yet.");
+    }
+
     return false;
   }
 
-  if (!this.room.state.players) {
-    this._setNetworkError("State binding failed: " + this._buildMissingStateError("room.state.players"));
+  console.log("[ArcadeNetworkClient] room.state:", this.room.state);
+  console.log("[ArcadeNetworkClient] has players key:", "players" in this.room.state);
+  console.log("[ArcadeNetworkClient] players value:", this.room.state.players);
+  console.log("[ArcadeNetworkClient] state keys:", Object.keys(this.room.state));
+
+  if (!("players" in this.room.state)) {
+    if (!this._hasScheduledStateBindRetry && this.room && this.room.onStateChange && this.room.onStateChange.once) {
+      this._hasScheduledStateBindRetry = true;
+      this.room.onStateChange.once(function () {
+        this._hasObservedFirstStatePatch = true;
+        this._hasScheduledStateBindRetry = false;
+
+        if (!this._bindStateListeners()) {
+          this._setNetworkError("State binding failed: " + this._buildMissingStateError("room.state.players"));
+        }
+      }.bind(this));
+      return false;
+    }
+
+    if (this._hasObservedFirstStatePatch) {
+      this._setNetworkError("State binding failed: " + this._buildMissingStateError("room.state.players"));
+    }
+
     return false;
   }
 
@@ -177,9 +212,18 @@ ArcadeNetworkClient.prototype._bindStateListeners = function () {
     return false;
   }
 
+  var stateCallbacks = $(this.room.state);
+  if (!stateCallbacks || !stateCallbacks.players) {
+    if (this._hasObservedFirstStatePatch) {
+      this._setNetworkError("State binding failed: unable to access callback handlers for room.state.players.");
+    }
+
+    return false;
+  }
+
   this._hasBoundPlayers = true;
 
-  $(this.room.state).players.onAdd(function (player, sessionId) {
+  stateCallbacks.players.onAdd(function (player, sessionId) {
     console.log("[ArcadeNetworkClient] player added", sessionId, player);
 
     self._emit("remoteAdded", {
