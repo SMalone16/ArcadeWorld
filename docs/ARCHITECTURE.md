@@ -2,11 +2,11 @@
 
 ## High-level split
 
-- **PlayCanvas Editor project:** owns visual scene/map/lights/layout.
-- **Repo `/client-scripts`:** reusable runtime logic scripts attached in PlayCanvas.
-- **Repo `/server`:** Colyseus authoritative room state server.
+- **`src/scenes`** owns static, visual scene assembly (room, lights, cabinets, camera roots).
+- **`src/network`** owns multiplayer lifecycle concerns (join/leave, player spawn/despawn mappings).
+- **`server/`** owns authoritative room state and connected client presence.
 
-This separation keeps networking logic out of scene-authoring concerns.
+This separation keeps networking logic out of render-only scene scripts.
 
 ## Server responsibilities (`/server`)
 
@@ -16,18 +16,19 @@ This separation keeps networking logic out of scene-authoring concerns.
 - Sync x/y/z (+ yaw) to all clients
 - Remove players on disconnect
 
-## Client script responsibilities (`/client-scripts`)
+## Client responsibilities (`/src`)
 
-- `ArcadeConfig.js`: endpoint and room configuration
-- `ArcadeNetworkClient.js`: connect/join + state event fan-out
-- `LocalPlayerController.js`: read WASD input and send movement
-- `RemotePlayerManager.js`: create/update/remove placeholder remote avatars
+- `scenes/LobbyScene.ts`: build static lobby + provide `playersRoot` and spawn point.
+- `entities/PlayerPrefab.ts`: reusable player entity factory used for local and remote players.
+- `network/LocalMockNetworkClient.ts`: join flow creates one player entity per connected client, stores `clientId -> Entity`, and despawns on leave/disconnect.
+- `entities/PlayerController.ts`: local input and camera follow for the local player's entity.
+- `game/ArcadeGame.ts`: orchestration only; requests joins and reads local player entity from the network layer.
 
 ## Why this helps students
 
-- Each script has one clear purpose.
-- Easy to reason about and debug.
-- Easy to replace placeholder parts later.
+- Each module has one clear purpose.
+- Networking and rendering responsibilities remain easy to trace.
+- Replacing mock networking with Colyseus remains isolated in `src/network`.
 
 ## Explicit non-goals for this slice
 

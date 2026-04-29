@@ -9,9 +9,10 @@ import type { Interactable } from '../entities/Interactable';
 export class ArcadeGame {
   private readonly app: Application;
   private readonly lobbyScene: LobbyScene;
-  private readonly playerController: PlayerController;
+  private playerController: PlayerController | null = null;
   private readonly hud: Hud;
   private readonly networkClient = createNetworkClient();
+  private readonly localClientId = 'local-client-1';
   private nearbyInteractable: Interactable | null = null;
 
   public constructor(private readonly canvas: HTMLCanvasElement, private readonly uiContainer: HTMLElement) {
@@ -27,16 +28,24 @@ export class ArcadeGame {
     this.lobbyScene = new LobbyScene({ app: this.app });
     this.lobbyScene.build();
 
-    this.playerController = new PlayerController(this.app, this.lobbyScene.player, this.lobbyScene.camera);
     this.hud = new Hud(this.uiContainer);
   }
 
   public async start(): Promise<void> {
     await this.networkClient.connect();
-    await this.networkClient.joinLobby('default-lobby');
+    await this.networkClient.joinLobby('default-lobby', {
+      localClientId: this.localClientId,
+      playersRoot: this.lobbyScene.playersRoot,
+      spawnPoint: this.lobbyScene.defaultSpawnPoint
+    });
+
+    const localPlayer = this.networkClient.getPlayerEntity(this.localClientId);
+    if (localPlayer) {
+      this.playerController = new PlayerController(this.app, localPlayer, this.lobbyScene.camera);
+    }
 
     this.app.on('update', (dt: number) => {
-      this.playerController.update(dt);
+      this.playerController?.update(dt);
       this.updateInteractionState();
 
       const keyboard = this.app.keyboard;
@@ -49,7 +58,14 @@ export class ArcadeGame {
   }
 
   private updateInteractionState(): void {
-    const playerPos = this.lobbyScene.player.getPosition();
+    const localPlayer = this.networkClient.getPlayerEntity(this.localClientId);
+    if (!localPlayer) {
+      this.nearbyInteractable = null;
+      this.hud.interactionPrompt.hide();
+      return;
+    }
+
+    const playerPos = localPlayer.getPosition();
     let closest: Interactable | null = null;
     let closestDistance = Number.POSITIVE_INFINITY;
 
