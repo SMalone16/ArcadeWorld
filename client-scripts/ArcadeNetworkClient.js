@@ -91,6 +91,17 @@ ArcadeNetworkClient.prototype._validateRequiredAttributes = function () {
   }
 };
 
+ArcadeNetworkClient.prototype._failConnection = function (reason, err) {
+  var message = "Connection failed: " + reason;
+  this._setNetworkError(message);
+  if (err) {
+    console.error("[ArcadeNetworkClient] " + message, err);
+    return;
+  }
+
+  console.error("[ArcadeNetworkClient] " + message);
+};
+
 ArcadeNetworkClient.prototype._connect = async function () {
   if (typeof Colyseus === "undefined") {
     console.error("[ArcadeNetworkClient] Colyseus client library missing.");
@@ -100,6 +111,12 @@ ArcadeNetworkClient.prototype._connect = async function () {
   try {
     this.client = new Colyseus.Client(this._serverUrl);
     this.room = await this.client.joinOrCreate(this._roomName);
+
+    if (!this.room || !this.room.state) {
+      this._failConnection(this._buildMissingStateError("room.state"));
+      return;
+    }
+
     this.sessionId = this.room.sessionId;
 
     console.log("[ArcadeNetworkClient] Connected", this.sessionId);
@@ -110,11 +127,6 @@ ArcadeNetworkClient.prototype._connect = async function () {
       "[ArcadeNetworkClient] room.state.players exists:",
       !!(this.room.state && this.room.state.players)
     );
-
-    if (!this.room || !this.room.state) {
-      console.error("[ArcadeNetworkClient] joinOrCreate resolved but room/state missing.");
-      return;
-    }
 
     this._bindStateListeners();
 
@@ -140,35 +152,55 @@ ArcadeNetworkClient.prototype._connect = async function () {
 
     if (!hasPlayers) {
       var missingPlayersError = this._buildMissingStateError("room.state.players");
-      var playersMessage = "Connection failed: " + missingPlayersError;
-      this._setNetworkError(playersMessage);
-      console.error("[ArcadeNetworkClient] " + playersMessage, {
+      this._failConnection(missingPlayersError, {
         hasRoom: hasRoom,
-        hasState: hasState
-      }, err);
+        hasState: hasState,
+        error: err
+      });
       return;
     }
 
-    var fallbackMessage = "Connection failed";
-    this._setNetworkError(fallbackMessage);
-    console.error("[ArcadeNetworkClient] " + fallbackMessage, err);
+    this._failConnection("Connection setup threw unexpectedly.", err);
   }
 };
 
 ArcadeNetworkClient.prototype._bindStateListeners = function () {
   var self = this;
 
-  try {
-    this._requireStatePath(this.room, "room.state");
-    this._requireStatePath(this.room.state, "room.state.players");
+  if (!this.room || !this.room.state) {
+    return;
+  }
 
-    if (this._hasBoundPlayers) {
+  var requiredCollections = [
+    { key: "players", required: true }
+  ];
+
+  for (var i = 0; i < requiredCollections.length; i += 1) {
+    var spec = requiredCollections[i];
+    var collection = this.room.state[spec.key];
+
+    if (!collection) {
+      if (spec.required) {
+        this._failConnection(this._buildMissingStateError("room.state." + spec.key));
+      }
       return;
     }
 
-    this._hasBoundPlayers = true;
+    if (typeof collection.onAdd !== "function") {
+      if (spec.required) {
+        this._failConnection("Invalid network collection \"room.state." + spec.key + "\": expected onAdd handler.");
+      }
+      return;
+    }
+  }
 
-    this.room.state.players.onAdd(function (player, sessionId) {
+  if (this._hasBoundPlayers) {
+    return;
+  }
+
+  this._hasBoundPlayers = true;
+
+  this.room.state.players.onAdd(function (player, sessionId) {
       console.log("[ArcadeNetworkClient] player added", sessionId, player);
 
       self._emit("remoteAdded", {
@@ -199,21 +231,8 @@ ArcadeNetworkClient.prototype._bindStateListeners = function () {
       console.log("[ArcadeNetworkClient] player removed", sessionId);
       self._emit("remoteRemoved", { sessionId: sessionId });
     });
-  } catch (err) {
-    var detail = err && err.message ? err.message : "Unknown state binding error.";
-    var combinedMessage = "Connection failed. " + detail;
-    this._setNetworkError(combinedMessage);
-    console.error("[ArcadeNetworkClient] " + combinedMessage, err);
-  }
 };
 
-ArcadeNetworkClient.prototype._requireStatePath = function (root, requiredPath) {
-  if (root) {
-    return;
-  }
-
-  throw new Error(this._buildMissingStateError(requiredPath));
-};
 
 ArcadeNetworkClient.prototype._buildMissingStateError = function (missingPath) {
   var stateRoot = this.room && this.room.state ? this.room.state : {};
