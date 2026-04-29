@@ -6,5 +6,10 @@ import { PlayerState } from "./PlayerState.js";
  */
 export class ArcadeWorldState extends Schema {
   @type({ map: PlayerState })
-  players = new MapSchema<PlayerState>();
+  players: MapSchema<PlayerState>;
+
+  constructor() {
+    super();
+    this.players = new MapSchema<PlayerState>();
+  }
 }
