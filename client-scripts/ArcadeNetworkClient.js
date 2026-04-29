@@ -47,6 +47,7 @@ ArcadeNetworkClient.prototype.initialize = function () {
   this.sessionId = null;
   this.room = null;
   this.client = null;
+  this.lastNetworkError = "";
 
   var cfg = window.ArcadeConfig || {};
   this._serverUrl = this.serverUrl || cfg.SERVER_URL || "ws://localhost:2567";
@@ -138,62 +139,39 @@ ArcadeNetworkClient.prototype._connect = async function () {
     var hasPlayers = !!(this.room && this.room.state && this.room.state.players);
 
     if (!hasPlayers) {
-      console.error("[ArcadeNetworkClient] Connection failed: missing state.players", {
+      var missingPlayersError = this._buildMissingStateError("room.state.players");
+      var playersMessage = "Connection failed: " + missingPlayersError;
+      this._setNetworkError(playersMessage);
+      console.error("[ArcadeNetworkClient] " + playersMessage, {
         hasRoom: hasRoom,
         hasState: hasState
       }, err);
       return;
     }
 
-    console.error("[ArcadeNetworkClient] Connection failed", err);
+    var fallbackMessage = "Connection failed";
+    this._setNetworkError(fallbackMessage);
+    console.error("[ArcadeNetworkClient] " + fallbackMessage, err);
   }
 };
 
 ArcadeNetworkClient.prototype._bindStateListeners = function () {
   var self = this;
 
-  if (!this.room || !this.room.state) {
-    console.error("[ArcadeNetworkClient] Cannot bind state listeners: room or room.state is missing.");
-    return;
-  }
+  try {
+    this._requireStatePath(this.room, "room.state");
+    this._requireStatePath(this.room.state, "room.state.players");
 
-  if (!this.room.state.players) {
-    var stateKeys = Object.keys(this.room.state || {});
-    console.error("[ArcadeNetworkClient] Cannot bind players listeners: missing state.players. Available state keys:", stateKeys);
-
-    if (!this._hasRetriedBind) {
-      this._hasRetriedBind = true;
-      setTimeout(function () {
-        console.warn("[ArcadeNetworkClient] Retrying players listener bind on next tick.");
-        this._bindStateListeners();
-      }.bind(this), 0);
+    if (this._hasBoundPlayers) {
+      return;
     }
 
-    return;
-  }
+    this._hasBoundPlayers = true;
 
-  if (this._hasBoundPlayers) {
-    return;
-  }
+    this.room.state.players.onAdd(function (player, sessionId) {
+      console.log("[ArcadeNetworkClient] player added", sessionId, player);
 
-  this._hasBoundPlayers = true;
-
-  this.room.state.players.onAdd(function (player, sessionId) {
-    console.log("[ArcadeNetworkClient] player added", sessionId, player);
-
-    self._emit("remoteAdded", {
-      sessionId: sessionId,
-      id: player.id,
-      x: player.x,
-      y: player.y,
-      z: player.z,
-      rotY: typeof player.rotY === "number" ? player.rotY : (player.yaw || 0),
-      name: player.name
-    });
-
-    player.onChange(function () {
-      console.log("[ArcadeNetworkClient] player changed", sessionId, player);
-      self._emit("remoteUpdated", {
+      self._emit("remoteAdded", {
         sessionId: sessionId,
         id: player.id,
         x: player.x,
@@ -202,13 +180,76 @@ ArcadeNetworkClient.prototype._bindStateListeners = function () {
         rotY: typeof player.rotY === "number" ? player.rotY : (player.yaw || 0),
         name: player.name
       });
-    });
-  });
 
-  this.room.state.players.onRemove(function (_player, sessionId) {
-    console.log("[ArcadeNetworkClient] player removed", sessionId);
-    self._emit("remoteRemoved", { sessionId: sessionId });
-  });
+      player.onChange(function () {
+        console.log("[ArcadeNetworkClient] player changed", sessionId, player);
+        self._emit("remoteUpdated", {
+          sessionId: sessionId,
+          id: player.id,
+          x: player.x,
+          y: player.y,
+          z: player.z,
+          rotY: typeof player.rotY === "number" ? player.rotY : (player.yaw || 0),
+          name: player.name
+        });
+      });
+    });
+
+    this.room.state.players.onRemove(function (_player, sessionId) {
+      console.log("[ArcadeNetworkClient] player removed", sessionId);
+      self._emit("remoteRemoved", { sessionId: sessionId });
+    });
+  } catch (err) {
+    var detail = err && err.message ? err.message : "Unknown state binding error.";
+    var combinedMessage = "Connection failed. " + detail;
+    this._setNetworkError(combinedMessage);
+    console.error("[ArcadeNetworkClient] " + combinedMessage, err);
+  }
+};
+
+ArcadeNetworkClient.prototype._requireStatePath = function (root, requiredPath) {
+  if (root) {
+    return;
+  }
+
+  throw new Error(this._buildMissingStateError(requiredPath));
+};
+
+ArcadeNetworkClient.prototype._buildMissingStateError = function (missingPath) {
+  var stateRoot = this.room && this.room.state ? this.room.state : {};
+  var topLevelKeys = Object.keys(stateRoot);
+  return "Missing required network field \"" + missingPath + "\". Available room.state keys: " + JSON.stringify(topLevelKeys);
+};
+
+ArcadeNetworkClient.prototype._setNetworkError = function (message) {
+  this.lastNetworkError = message;
+  this._renderNetworkError(message);
+};
+
+ArcadeNetworkClient.prototype._renderNetworkError = function (message) {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  var labelId = "arcade-network-error-label";
+  var label = document.getElementById(labelId);
+  if (!label) {
+    label = document.createElement("div");
+    label.id = labelId;
+    label.style.position = "fixed";
+    label.style.bottom = "16px";
+    label.style.left = "16px";
+    label.style.maxWidth = "70vw";
+    label.style.padding = "8px 12px";
+    label.style.background = "rgba(0,0,0,0.75)";
+    label.style.color = "#ff9b9b";
+    label.style.fontFamily = "monospace";
+    label.style.fontSize = "12px";
+    label.style.zIndex = "9999";
+    document.body.appendChild(label);
+  }
+
+  label.textContent = message;
 };
 
 ArcadeNetworkClient.prototype.sendMove = function (position, rotY, name) {
