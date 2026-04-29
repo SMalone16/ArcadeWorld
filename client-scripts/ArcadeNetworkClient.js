@@ -92,7 +92,7 @@ ArcadeNetworkClient.prototype._validateRequiredAttributes = function () {
 };
 
 ArcadeNetworkClient.prototype._failConnection = function (reason, err) {
-  var message = "Connection failed: " + reason;
+  var message = "Join failed: " + reason;
   this._setNetworkError(message);
   if (err) {
     console.error("[ArcadeNetworkClient] " + message, err);
@@ -111,99 +111,89 @@ ArcadeNetworkClient.prototype._connect = async function () {
   try {
     this.client = new Colyseus.Client(this._serverUrl);
     this.room = await this.client.joinOrCreate(this._roomName);
-
-    if (!this.room || !this.room.state) {
-      this._failConnection(this._buildMissingStateError("room.state"));
-      return;
-    }
-
-    this.sessionId = this.room.sessionId;
-
-    console.log("[ArcadeNetworkClient] Connected", this.sessionId);
-    this._emit("connected", { sessionId: this.sessionId });
-
-    console.log("[ArcadeNetworkClient] room.state after join", this.room.state);
-    console.log(
-      "[ArcadeNetworkClient] room.state.players exists:",
-      !!(this.room.state && this.room.state.players)
-    );
-
-    this._bindStateListeners();
-
-    this.room.onStateChange(function () {
-      if (!this._hasBoundPlayers && this.room && this.room.state && this.room.state.players) {
-        console.log("[ArcadeNetworkClient] players map appeared after state patch; binding listeners now.");
-        this._bindStateListeners();
-      }
-    }.bind(this));
-
-    this.room.onLeave((code) => {
-      console.warn("[ArcadeNetworkClient] Left room", code);
-      this._emit("disconnected", { code: code });
-    });
-
-    this.room.onError((code, message) => {
-      console.error("[ArcadeNetworkClient] Room error", code, message);
-    });
   } catch (err) {
-    var hasRoom = !!this.room;
-    var hasState = !!(this.room && this.room.state);
-    var hasPlayers = !!(this.room && this.room.state && this.room.state.players);
-
-    if (!hasPlayers) {
-      var missingPlayersError = this._buildMissingStateError("room.state.players");
-      this._failConnection(missingPlayersError, {
-        hasRoom: hasRoom,
-        hasState: hasState,
-        error: err
-      });
-      return;
-    }
-
-    this._failConnection("Connection setup threw unexpectedly.", err);
+    this._failConnection("Unable to join room \"" + this._roomName + "\".", err);
+    return;
   }
+
+  this.sessionId = this.room.sessionId;
+
+  console.log("[ArcadeNetworkClient] Connected", this.sessionId);
+  this._emit("connected", { sessionId: this.sessionId });
+
+  console.log("room", this.room);
+  console.log("room.state", this.room ? this.room.state : null);
+  console.log("room.state.players", this.room && this.room.state ? this.room.state.players : null);
+
+  var didBind = this._bindStateListeners();
+  if (!didBind) {
+    console.warn("[ArcadeNetworkClient] State listeners not ready immediately after join; waiting for state updates.");
+  }
+
+  this.room.onStateChange(function () {
+    if (!this._hasBoundPlayers) {
+      var bound = this._bindStateListeners();
+      if (!bound) {
+        console.warn("[ArcadeNetworkClient] Waiting for room.state.players to become available.");
+      }
+    }
+  }.bind(this));
+
+  this.room.onLeave((code) => {
+    console.warn("[ArcadeNetworkClient] Left room", code);
+    this._emit("disconnected", { code: code });
+  });
+
+  this.room.onError((code, message) => {
+    console.error("[ArcadeNetworkClient] Room error", code, message);
+  });
 };
 
 ArcadeNetworkClient.prototype._bindStateListeners = function () {
   var self = this;
 
-  if (!this.room || !this.room.state) {
-    return;
-  }
-
-  var requiredCollections = [
-    { key: "players", required: true }
-  ];
-
-  for (var i = 0; i < requiredCollections.length; i += 1) {
-    var spec = requiredCollections[i];
-    var collection = this.room.state[spec.key];
-
-    if (!collection) {
-      if (spec.required) {
-        this._failConnection(this._buildMissingStateError("room.state." + spec.key));
-      }
-      return;
-    }
-
-    if (typeof collection.onAdd !== "function") {
-      if (spec.required) {
-        this._failConnection("Invalid network collection \"room.state." + spec.key + "\": expected onAdd handler.");
-      }
-      return;
-    }
-  }
-
   if (this._hasBoundPlayers) {
-    return;
+    return true;
+  }
+
+  if (!this.room || !this.room.state) {
+    this._setNetworkError("State binding failed: room.state is not ready yet.");
+    return false;
+  }
+
+  if (!this.room.state.players) {
+    this._setNetworkError("State binding failed: " + this._buildMissingStateError("room.state.players"));
+    return false;
+  }
+
+  if (typeof Colyseus.getStateCallbacks !== "function") {
+    this._setNetworkError("State binding failed: Colyseus.getStateCallbacks is unavailable. Use Colyseus 0.16 browser client.");
+    return false;
+  }
+
+  var $ = Colyseus.getStateCallbacks(this.room);
+  if (typeof $ !== "function") {
+    this._setNetworkError("State binding failed: unable to obtain Colyseus state callback helper.");
+    return false;
   }
 
   this._hasBoundPlayers = true;
 
-  this.room.state.players.onAdd(function (player, sessionId) {
-      console.log("[ArcadeNetworkClient] player added", sessionId, player);
+  $(this.room.state).players.onAdd(function (player, sessionId) {
+    console.log("[ArcadeNetworkClient] player added", sessionId, player);
 
-      self._emit("remoteAdded", {
+    self._emit("remoteAdded", {
+      sessionId: sessionId,
+      id: player.id,
+      x: player.x,
+      y: player.y,
+      z: player.z,
+      rotY: typeof player.rotY === "number" ? player.rotY : (player.yaw || 0),
+      name: player.name
+    });
+
+    $(player).listen("x", function () {
+      self._emit("remoteUpdated", {
         sessionId: sessionId,
         id: player.id,
         x: player.x,
@@ -212,27 +202,52 @@ ArcadeNetworkClient.prototype._bindStateListeners = function () {
         rotY: typeof player.rotY === "number" ? player.rotY : (player.yaw || 0),
         name: player.name
       });
+    });
 
-      player.onChange(function () {
-        console.log("[ArcadeNetworkClient] player changed", sessionId, player);
-        self._emit("remoteUpdated", {
-          sessionId: sessionId,
-          id: player.id,
-          x: player.x,
-          y: player.y,
-          z: player.z,
-          rotY: typeof player.rotY === "number" ? player.rotY : (player.yaw || 0),
-          name: player.name
-        });
+    $(player).listen("y", function () {
+      self._emit("remoteUpdated", {
+        sessionId: sessionId,
+        id: player.id,
+        x: player.x,
+        y: player.y,
+        z: player.z,
+        rotY: typeof player.rotY === "number" ? player.rotY : (player.yaw || 0),
+        name: player.name
       });
     });
 
-    this.room.state.players.onRemove(function (_player, sessionId) {
-      console.log("[ArcadeNetworkClient] player removed", sessionId);
-      self._emit("remoteRemoved", { sessionId: sessionId });
+    $(player).listen("z", function () {
+      self._emit("remoteUpdated", {
+        sessionId: sessionId,
+        id: player.id,
+        x: player.x,
+        y: player.y,
+        z: player.z,
+        rotY: typeof player.rotY === "number" ? player.rotY : (player.yaw || 0),
+        name: player.name
+      });
     });
-};
 
+    $(player).listen("rotY", function () {
+      self._emit("remoteUpdated", {
+        sessionId: sessionId,
+        id: player.id,
+        x: player.x,
+        y: player.y,
+        z: player.z,
+        rotY: typeof player.rotY === "number" ? player.rotY : (player.yaw || 0),
+        name: player.name
+      });
+    });
+  });
+
+  $(this.room.state).players.onRemove(function (_player, sessionId) {
+    console.log("[ArcadeNetworkClient] player removed", sessionId);
+    self._emit("remoteRemoved", { sessionId: sessionId });
+  });
+
+  return true;
+};
 
 ArcadeNetworkClient.prototype._buildMissingStateError = function (missingPath) {
   var stateRoot = this.room && this.room.state ? this.room.state : {};

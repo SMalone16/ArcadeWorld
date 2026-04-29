@@ -19,6 +19,10 @@ Choose one option:
 
 The global `Colyseus` object must be available before `ArcadeNetworkClient.js` runs.
 
+Version compatibility (required for the callback API used by `ArcadeNetworkClient.js`):
+- Server packages are pinned to Colyseus 0.16 + Schema 3.x (`@colyseus/core`, `@colyseus/ws-transport`, `@colyseus/schema`).
+- In PlayCanvas, load a 0.16 browser client build (for example, a CDN URL under `colyseus.js@0.16.x`) so `Colyseus.getStateCallbacks(room)` is available.
+
 ## 3) Configure SERVER_URL for Codespaces
 
 Edit `ArcadeConfig.js`:
