@@ -1,5 +1,10 @@
 import type { Entity, Vec3 } from 'playcanvas';
 
+export interface SpawnTransform {
+  position: Vec3;
+  rotationEuler: Vec3;
+}
+
 export interface Vector3Like {
   x: number;
   y: number;
@@ -15,7 +20,7 @@ export interface IMiniGame {
 export interface NetworkJoinContext {
   localClientId: string;
   playersRoot: Entity;
-  spawnPoint: Vec3;
+  spawnTransforms: SpawnTransform[];
 }
 
 export interface INetworkClient {

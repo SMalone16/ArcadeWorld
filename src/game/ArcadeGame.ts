@@ -36,7 +36,7 @@ export class ArcadeGame {
     await this.networkClient.joinLobby('default-lobby', {
       localClientId: this.localClientId,
       playersRoot: this.lobbyScene.playersRoot,
-      spawnPoint: this.lobbyScene.defaultSpawnPoint
+      spawnTransforms: this.lobbyScene.getSpawnTransforms()
     });
 
     const localPlayer = this.networkClient.getPlayerEntity(this.localClientId);

@@ -18,9 +18,9 @@ This separation keeps networking logic out of render-only scene scripts.
 
 ## Client responsibilities (`/src`)
 
-- `scenes/LobbyScene.ts`: build static lobby + provide `playersRoot` and spawn point.
+- `scenes/LobbyScene.ts`: build static lobby + provide `playersRoot` and `SpawnPoint` transforms for network joins.
 - `entities/PlayerPrefab.ts`: reusable player entity factory used for local and remote players.
-- `network/LocalMockNetworkClient.ts`: join flow creates one player entity per connected client, stores `clientId -> Entity`, and despawns on leave/disconnect.
+- `network/LocalMockNetworkClient.ts`: join flow picks free spawn transforms (random from free points), applies consistent initial rotation, falls back to farthest/round-robin when saturated, stores `clientId -> Entity`, and despawns on leave/disconnect.
 - `entities/PlayerController.ts`: local input and camera follow for the local player's entity.
 - `game/ArcadeGame.ts`: orchestration only; requests joins and reads local player entity from the network layer.
 

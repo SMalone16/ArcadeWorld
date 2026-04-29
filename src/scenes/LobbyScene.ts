@@ -2,6 +2,7 @@ import { Color, Entity, StandardMaterial, Vec3 } from 'playcanvas';
 import { GAME_CONFIG } from '../game/config';
 import { ArcadeCabinet } from '../entities/ArcadeCabinet';
 import type { Interactable } from '../entities/Interactable';
+import type { SpawnTransform } from '../game/types';
 import { LOBBY_CABINET_LAYOUT } from './lobbyLayout';
 
 interface LobbySceneContext {
@@ -12,7 +13,7 @@ export class LobbyScene {
   public readonly root = new Entity('lobby-root');
   public readonly playersRoot = new Entity('players-root');
   public readonly interactables: Interactable[] = [];
-  public readonly defaultSpawnPoint = new Vec3(0, 1.6, 4);
+  private readonly spawnPointEntities: Entity[] = [];
 
   public constructor(private readonly context: LobbySceneContext) {
   }
@@ -22,8 +23,16 @@ export class LobbyScene {
     this.addLighting();
     this.addRoom();
     this.addCabinets();
+    this.addSpawnPoints();
 
     this.root.addChild(this.playersRoot);
+  }
+
+  public getSpawnTransforms(): SpawnTransform[] {
+    return this.spawnPointEntities.map((spawnPoint) => ({
+      position: spawnPoint.getPosition().clone(),
+      rotationEuler: spawnPoint.getEulerAngles().clone()
+    }));
   }
 
   private addLighting(): void {
@@ -58,6 +67,25 @@ export class LobbyScene {
       const cabinet = new ArcadeCabinet(entry.id, entry.miniGameId, entry.position);
       this.interactables.push(cabinet);
       this.root.addChild(cabinet.entity);
+    });
+  }
+
+  private addSpawnPoints(): void {
+    const spawnDefinitions = [
+      { position: new Vec3(0, 1.6, 4), rotationEuler: new Vec3(0, 180, 0) },
+      { position: new Vec3(-5, 1.6, 2), rotationEuler: new Vec3(0, 140, 0) },
+      { position: new Vec3(5, 1.6, 2), rotationEuler: new Vec3(0, 220, 0) },
+      { position: new Vec3(-3, 1.6, -3), rotationEuler: new Vec3(0, 45, 0) },
+      { position: new Vec3(3, 1.6, -3), rotationEuler: new Vec3(0, -45, 0) }
+    ];
+
+    spawnDefinitions.forEach((spawn, index) => {
+      const spawnPoint = new Entity(`spawn-point-${index + 1}`);
+      spawnPoint.tags.add('SpawnPoint');
+      spawnPoint.setPosition(spawn.position);
+      spawnPoint.setEulerAngles(spawn.rotationEuler);
+      this.spawnPointEntities.push(spawnPoint);
+      this.root.addChild(spawnPoint);
     });
   }
 
