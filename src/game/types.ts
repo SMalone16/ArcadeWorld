@@ -1,4 +1,4 @@
-import type { Entity } from 'playcanvas';
+import type { Entity, Vec3 } from 'playcanvas';
 
 export interface Vector3Like {
   x: number;
@@ -12,11 +12,18 @@ export interface IMiniGame {
   launch(cabinetEntity: Entity): void;
 }
 
+export interface NetworkJoinContext {
+  localClientId: string;
+  playersRoot: Entity;
+  spawnPoint: Vec3;
+}
+
 export interface INetworkClient {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
-  joinLobby(lobbyId: string): Promise<void>;
+  joinLobby(lobbyId: string, context: NetworkJoinContext): Promise<void>;
   leaveLobby(): Promise<void>;
   sendInput(input: Record<string, unknown>): void;
   onSnapshot(handler: (snapshot: unknown) => void): void;
+  getPlayerEntity(clientId: string): Entity | null;
 }
