@@ -13,6 +13,11 @@ RemotePlayerManager.attributes.add("avatarColor", {
   title: "Remote Avatar Color"
 });
 
+RemotePlayerManager.attributes.add("playerTemplate", {
+  type: "entity",
+  title: "Remote Player Template"
+});
+
 /**
  * Creates lightweight placeholder avatars for remote players.
  * Keeps scene/editor setup easy for teachers and students.
@@ -45,14 +50,21 @@ RemotePlayerManager.prototype._onRemoteAdded = function (data) {
     return;
   }
 
-  var remote = new pc.Entity("Remote_" + data.sessionId);
-  remote.addComponent("model", { type: "box" });
-  remote.setLocalScale(3, 3, 3);
+  var remote = null;
+  if (this.playerTemplate && this.playerTemplate.clone) {
+    remote = this.playerTemplate.clone();
+    remote.enabled = true;
+    remote.name = "Remote_" + data.sessionId;
+  } else {
+    remote = new pc.Entity("Remote_" + data.sessionId);
+    remote.addComponent("model", { type: "box" });
+    remote.setLocalScale(3, 3, 3);
 
-  var material = new pc.StandardMaterial();
-  material.diffuse = this.avatarColor.clone();
-  material.update();
-  remote.model.material = material;
+    var material = new pc.StandardMaterial();
+    material.diffuse = this.avatarColor.clone();
+    material.update();
+    remote.model.material = material;
+  }
 
   remote.setPosition(data.x, data.y, data.z);
   remote.setEulerAngles(0, (typeof data.rotY === "number" ? data.rotY : (data.yaw || 0)), 0);

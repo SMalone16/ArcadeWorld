@@ -18,7 +18,7 @@ ArcadeNetworkClient.attributes.add("roomName", {
 
 ArcadeNetworkClient.attributes.add("playerTemplate", {
   type: "entity",
-  title: "Player Prefab/Template (optional)"
+  title: "Player Prefab/Template (required for remotes)"
 });
 
 ArcadeNetworkClient.attributes.add("remotePlayerManagerEntity", {
@@ -28,13 +28,14 @@ ArcadeNetworkClient.attributes.add("remotePlayerManagerEntity", {
 
 ArcadeNetworkClient.attributes.add("localPlayerEntity", {
   type: "entity",
-  title: "Local Player Entity (optional)"
+  title: "Local Player Entity"
 });
 
-/**
- * Minimal event-based wrapper around Colyseus.
- * Other scripts (LocalPlayerController, RemotePlayerManager) subscribe to events.
- */
+ArcadeNetworkClient.attributes.add("spawnPointsRoot", {
+  type: "entity",
+  title: "Spawn Points Root (SpawnPoints)"
+});
+
 ArcadeNetworkClient.prototype.initialize = function () {
   this.callbacks = {
     connected: [],
@@ -48,60 +49,74 @@ ArcadeNetworkClient.prototype.initialize = function () {
   this.room = null;
   this.client = null;
   this.lastNetworkError = "";
-  this._hasObservedFirstStatePatch = false;
-  this._hasScheduledStateBindRetry = false;
+  this._hasBoundPlayers = false;
 
   var cfg = window.ArcadeConfig || {};
-  this._serverUrl = this.serverUrl || cfg.SERVER_URL || "ws://localhost:2567";
+  this._serverUrl = this.serverUrl || cfg.SERVER_URL || "";
   this._roomName = this.roomName || cfg.ROOM_NAME || "arcade_lobby";
   this._resolvedPlayerTemplate = this.playerTemplate || null;
-  this._resolvedRemotePlayerManagerEntity = this.remotePlayerManagerEntity || null;
   this._resolvedLocalPlayerEntity = this.localPlayerEntity || null;
+  this._spawnPointsRoot = this.spawnPointsRoot || null;
+  this._spawnPoints = this._collectSpawnPoints();
 
-  console.log("[ArcadeNetworkClient] Resolved attributes", {
-    serverUrl: this._serverUrl,
-    roomName: this._roomName,
-    hasPlayerTemplate: !!this._resolvedPlayerTemplate,
-    hasRemotePlayerManagerEntity: !!this._resolvedRemotePlayerManagerEntity,
-    hasLocalPlayerEntity: !!this._resolvedLocalPlayerEntity
-  });
-
-  this._validateRequiredAttributes();
+  if (!this._validateRequiredAttributes()) {
+    return;
+  }
 
   this._connect();
 };
 
 ArcadeNetworkClient.prototype._validateRequiredAttributes = function () {
-  var missing = [];
+  var hasError = false;
 
   if (!this._serverUrl || !String(this._serverUrl).trim()) {
-    missing.push("serverUrl (or window.ArcadeConfig.SERVER_URL)");
+    console.error("[ArcadeNetworkClient] Missing serverUrl. Assign serverUrl attribute or window.ArcadeConfig.SERVER_URL.");
+    hasError = true;
   }
 
   if (!this._roomName || !String(this._roomName).trim()) {
-    missing.push("roomName (or window.ArcadeConfig.ROOM_NAME)");
+    console.error("[ArcadeNetworkClient] Missing roomName. Assign roomName attribute or window.ArcadeConfig.ROOM_NAME.");
+    hasError = true;
+  }
+
+  if (!this._resolvedLocalPlayerEntity) {
+    console.error("[ArcadeNetworkClient] Missing localPlayerEntity. Assign the controllable local player entity.");
+    hasError = true;
   }
 
   if (!this._resolvedPlayerTemplate) {
-    missing.push("playerTemplate (assign your player prefab/template entity)");
+    console.error("[ArcadeNetworkClient] Missing playerTemplate. Assign template/prefab entity for remote players.");
+    hasError = true;
   }
 
-  if (missing.length > 0) {
-    var message = "[ArcadeNetworkClient] Missing required attributes: " + missing.join(", ") + ". Fix the script attributes on this entity before launch.";
-    console.error(message);
-    throw new Error(message);
+  if (!this._spawnPointsRoot) {
+    console.error("[ArcadeNetworkClient] Missing spawnPointsRoot. Assign the SpawnPoints parent entity.");
+    hasError = true;
   }
+
+  if (this._spawnPoints.length === 0) {
+    console.error("[ArcadeNetworkClient] Spawn points missing. Ensure SpawnPoints has enabled child entities to use as spawn points.");
+    hasError = true;
+  }
+
+  return !hasError;
 };
 
-ArcadeNetworkClient.prototype._failConnection = function (reason, err) {
-  var message = "Join failed: " + reason;
-  this._setNetworkError(message);
-  if (err) {
-    console.error("[ArcadeNetworkClient] " + message, err);
-    return;
+ArcadeNetworkClient.prototype._collectSpawnPoints = function () {
+  if (!this.spawnPointsRoot) {
+    return [];
   }
 
-  console.error("[ArcadeNetworkClient] " + message);
+  var children = this.spawnPointsRoot.children || [];
+  var enabled = [];
+  for (var i = 0; i < children.length; i++) {
+    if (children[i] && children[i].enabled) {
+      enabled.push(children[i]);
+    }
+  }
+
+  console.log("[ArcadeNetworkClient] Spawn points found: " + enabled.length);
+  return enabled;
 };
 
 ArcadeNetworkClient.prototype._connect = async function () {
@@ -114,226 +129,134 @@ ArcadeNetworkClient.prototype._connect = async function () {
     this.client = new Colyseus.Client(this._serverUrl);
     this.room = await this.client.joinOrCreate(this._roomName);
   } catch (err) {
-    this._failConnection("Unable to join room \"" + this._roomName + "\".", err);
+    console.error("[ArcadeNetworkClient] Join failed.", err);
     return;
   }
 
   this.sessionId = this.room.sessionId;
-
-  console.log("[ArcadeNetworkClient] Connected", this.sessionId);
+  console.log("[ArcadeNetworkClient] Joined room", this._roomName, this.sessionId);
   this._emit("connected", { sessionId: this.sessionId });
 
-  console.log("room", this.room);
-  console.log("room.state", this.room ? this.room.state : null);
-  console.log("room.state.players", this.room && this.room.state ? this.room.state.players : null);
-
-  if (!this.room.state) {
-    console.warn("[ArcadeNetworkClient] room.state missing immediately after join; waiting for first state patch before binding listeners.");
-    this.room.onStateChange.once(function () {
-      this._hasObservedFirstStatePatch = true;
-      this._bindStateListeners();
-    }.bind(this));
-  } else {
-    var didBind = this._bindStateListeners();
-    if (!didBind) {
-      console.warn("[ArcadeNetworkClient] State listeners not ready immediately after join; waiting for state updates.");
-    }
-  }
+  this._spawnLocalPlayer();
+  this._bindStateListeners();
 
   this.room.onStateChange(function () {
-    this._hasObservedFirstStatePatch = true;
     if (!this._hasBoundPlayers) {
-      var bound = this._bindStateListeners();
-      if (!bound) {
-        console.warn("[ArcadeNetworkClient] Waiting for room.state.players to become available.");
-      }
+      this._bindStateListeners();
     }
   }.bind(this));
 
-  this.room.onLeave((code) => {
+  this.room.onLeave(function (code) {
     console.warn("[ArcadeNetworkClient] Left room", code);
     this._emit("disconnected", { code: code });
-  });
+  }.bind(this));
+};
 
-  this.room.onError((code, message) => {
-    console.error("[ArcadeNetworkClient] Room error", code, message);
-  });
+ArcadeNetworkClient.prototype._spawnLocalPlayer = function () {
+  var local = this._resolvedLocalPlayerEntity;
+  if (!local || this._spawnPoints.length === 0) {
+    return;
+  }
+
+  var spawnEntity = this._selectSpawnPoint();
+  var spawnPosition = spawnEntity.getPosition().clone();
+
+  console.log("[ArcadeNetworkClient] Selected spawn point: " + spawnEntity.name + " @", spawnPosition);
+
+  local.setPosition(spawnPosition);
+  local.enabled = true;
+  this._enableLocalControlScripts(local);
+
+  console.log("[ArcadeNetworkClient] Local player spawned at:", spawnPosition);
+  console.log("[ArcadeNetworkClient] Local controls enabled");
+
+  var rotY = local.getEulerAngles().y;
+  this.sendMove(spawnPosition, rotY, null);
+};
+
+ArcadeNetworkClient.prototype._selectSpawnPoint = function () {
+  if (this._spawnPoints.length === 1) {
+    return this._spawnPoints[0];
+  }
+
+  var seed = 0;
+  if (this.sessionId) {
+    for (var i = 0; i < this.sessionId.length; i++) {
+      seed = ((seed << 5) - seed) + this.sessionId.charCodeAt(i);
+      seed |= 0;
+    }
+  } else {
+    seed = Math.floor(Math.random() * 10000);
+  }
+
+  var idx = Math.abs(seed) % this._spawnPoints.length;
+  return this._spawnPoints[idx];
+};
+
+ArcadeNetworkClient.prototype._enableLocalControlScripts = function (localEntity) {
+  if (!localEntity.script) {
+    return;
+  }
+
+  var scripts = localEntity.script;
+  if (scripts.localPlayerController) {
+    scripts.localPlayerController.enabled = true;
+  }
+  if (scripts.characterController) {
+    scripts.characterController.enabled = true;
+  }
+  if (scripts.firstPersonCamera) {
+    scripts.firstPersonCamera.enabled = true;
+  }
 };
 
 ArcadeNetworkClient.prototype._bindStateListeners = function () {
+  if (this._hasBoundPlayers || !this.room || !this.room.state || typeof Colyseus.getStateCallbacks !== "function") {
+    return false;
+  }
+
   var self = this;
-
-  if (this._hasBoundPlayers) {
-    return true;
-  }
-
-  if (!this.room || !this.room.state) {
-    if (this._hasObservedFirstStatePatch) {
-      this._setNetworkError("State binding failed: room.state is not ready yet.");
-    }
-
-    return false;
-  }
-
-  console.log("[ArcadeNetworkClient] room.state:", this.room.state);
-  console.log("[ArcadeNetworkClient] has players key:", "players" in this.room.state);
-  console.log("[ArcadeNetworkClient] players value:", this.room.state.players);
-  console.log("[ArcadeNetworkClient] state keys:", Object.keys(this.room.state));
-
-  if (!("players" in this.room.state)) {
-    if (!this._hasScheduledStateBindRetry && this.room && this.room.onStateChange && this.room.onStateChange.once) {
-      this._hasScheduledStateBindRetry = true;
-      this.room.onStateChange.once(function () {
-        this._hasObservedFirstStatePatch = true;
-        this._hasScheduledStateBindRetry = false;
-
-        if (!this._bindStateListeners()) {
-          this._setNetworkError("State binding failed: " + this._buildMissingStateError("room.state.players"));
-        }
-      }.bind(this));
-      return false;
-    }
-
-    if (this._hasObservedFirstStatePatch) {
-      this._setNetworkError("State binding failed: " + this._buildMissingStateError("room.state.players"));
-    }
-
-    return false;
-  }
-
-  if (typeof Colyseus.getStateCallbacks !== "function") {
-    this._setNetworkError("State binding failed: Colyseus.getStateCallbacks is unavailable. Use Colyseus 0.16 browser client.");
-    return false;
-  }
-
   var $ = Colyseus.getStateCallbacks(this.room);
-  if (typeof $ !== "function") {
-    this._setNetworkError("State binding failed: unable to obtain Colyseus state callback helper.");
-    return false;
-  }
-
   var stateCallbacks = $(this.room.state);
   if (!stateCallbacks || !stateCallbacks.players) {
-    if (this._hasObservedFirstStatePatch) {
-      this._setNetworkError("State binding failed: unable to access callback handlers for room.state.players.");
-    }
-
     return false;
   }
 
   this._hasBoundPlayers = true;
 
   stateCallbacks.players.onAdd(function (player, sessionId) {
-    console.log("[ArcadeNetworkClient] player added", sessionId, player);
+    console.log("[ArcadeNetworkClient] Remote player added", sessionId);
+    self._emit("remoteAdded", self._toPlayerPayload(player, sessionId));
 
-    self._emit("remoteAdded", {
-      sessionId: sessionId,
-      id: player.id,
-      x: player.x,
-      y: player.y,
-      z: player.z,
-      rotY: typeof player.rotY === "number" ? player.rotY : (player.yaw || 0),
-      name: player.name
-    });
-
-    $(player).listen("x", function () {
-      self._emit("remoteUpdated", {
-        sessionId: sessionId,
-        id: player.id,
-        x: player.x,
-        y: player.y,
-        z: player.z,
-        rotY: typeof player.rotY === "number" ? player.rotY : (player.yaw || 0),
-        name: player.name
-      });
-    });
-
-    $(player).listen("y", function () {
-      self._emit("remoteUpdated", {
-        sessionId: sessionId,
-        id: player.id,
-        x: player.x,
-        y: player.y,
-        z: player.z,
-        rotY: typeof player.rotY === "number" ? player.rotY : (player.yaw || 0),
-        name: player.name
-      });
-    });
-
-    $(player).listen("z", function () {
-      self._emit("remoteUpdated", {
-        sessionId: sessionId,
-        id: player.id,
-        x: player.x,
-        y: player.y,
-        z: player.z,
-        rotY: typeof player.rotY === "number" ? player.rotY : (player.yaw || 0),
-        name: player.name
-      });
-    });
-
-    $(player).listen("rotY", function () {
-      self._emit("remoteUpdated", {
-        sessionId: sessionId,
-        id: player.id,
-        x: player.x,
-        y: player.y,
-        z: player.z,
-        rotY: typeof player.rotY === "number" ? player.rotY : (player.yaw || 0),
-        name: player.name
-      });
-    });
+    var playerCallbacks = $(player);
+    playerCallbacks.listen("x", function () { self._emit("remoteUpdated", self._toPlayerPayload(player, sessionId)); });
+    playerCallbacks.listen("y", function () { self._emit("remoteUpdated", self._toPlayerPayload(player, sessionId)); });
+    playerCallbacks.listen("z", function () { self._emit("remoteUpdated", self._toPlayerPayload(player, sessionId)); });
+    playerCallbacks.listen("rotY", function () { self._emit("remoteUpdated", self._toPlayerPayload(player, sessionId)); });
   });
 
-  $(this.room.state).players.onRemove(function (_player, sessionId) {
-    console.log("[ArcadeNetworkClient] player removed", sessionId);
+  stateCallbacks.players.onRemove(function (_player, sessionId) {
+    console.log("[ArcadeNetworkClient] Remote player removed", sessionId);
     self._emit("remoteRemoved", { sessionId: sessionId });
   });
 
   return true;
 };
 
-ArcadeNetworkClient.prototype._buildMissingStateError = function (missingPath) {
-  var stateRoot = this.room && this.room.state ? this.room.state : {};
-  var topLevelKeys = Object.keys(stateRoot);
-  return "Missing required network field \"" + missingPath + "\". Available room.state keys: " + JSON.stringify(topLevelKeys);
-};
-
-ArcadeNetworkClient.prototype._setNetworkError = function (message) {
-  this.lastNetworkError = message;
-  this._renderNetworkError(message);
-};
-
-ArcadeNetworkClient.prototype._renderNetworkError = function (message) {
-  if (typeof document === "undefined") {
-    return;
-  }
-
-  var labelId = "arcade-network-error-label";
-  var label = document.getElementById(labelId);
-  if (!label) {
-    label = document.createElement("div");
-    label.id = labelId;
-    label.style.position = "fixed";
-    label.style.bottom = "16px";
-    label.style.left = "16px";
-    label.style.maxWidth = "70vw";
-    label.style.padding = "8px 12px";
-    label.style.background = "rgba(0,0,0,0.75)";
-    label.style.color = "#ff9b9b";
-    label.style.fontFamily = "monospace";
-    label.style.fontSize = "12px";
-    label.style.zIndex = "9999";
-    document.body.appendChild(label);
-  }
-
-  label.textContent = message;
+ArcadeNetworkClient.prototype._toPlayerPayload = function (player, sessionId) {
+  return {
+    sessionId: sessionId,
+    id: player.id,
+    x: player.x,
+    y: player.y,
+    z: player.z,
+    rotY: typeof player.rotY === "number" ? player.rotY : (player.yaw || 0),
+    name: player.name
+  };
 };
 
 ArcadeNetworkClient.prototype.sendMove = function (position, rotY, name) {
-  if (!this.room) {
-    return;
-  }
+  if (!this.room) return;
 
   this.room.send("move", {
     x: position.x,
@@ -346,17 +269,11 @@ ArcadeNetworkClient.prototype.sendMove = function (position, rotY, name) {
 };
 
 ArcadeNetworkClient.prototype.onEvent = function (eventName, callback) {
-  if (!this.callbacks[eventName]) {
-    console.warn("[ArcadeNetworkClient] Unknown event", eventName);
-    return;
-  }
-
+  if (!this.callbacks[eventName]) return;
   this.callbacks[eventName].push(callback);
 };
 
 ArcadeNetworkClient.prototype._emit = function (eventName, payload) {
   var listeners = this.callbacks[eventName] || [];
-  for (var i = 0; i < listeners.length; i++) {
-    listeners[i](payload);
-  }
+  for (var i = 0; i < listeners.length; i++) listeners[i](payload);
 };
