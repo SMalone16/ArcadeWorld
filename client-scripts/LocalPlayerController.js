@@ -14,7 +14,7 @@ LocalPlayerController.attributes.add("cameraEntity", {
 
 LocalPlayerController.attributes.add("moveSpeed", {
   type: "number",
-  default: 5,
+  default: 12.5,
   title: "Move Speed"
 });
 
