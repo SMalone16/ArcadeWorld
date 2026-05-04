@@ -167,8 +167,7 @@ ArcadeNetworkClient.prototype._spawnLocalPlayer = function () {
   local.enabled = true;
   this._enableLocalControlScripts(local);
 
-  console.log("[ArcadeNetworkClient] Local player spawned at:", spawnPosition);
-  console.log("[ArcadeNetworkClient] Local controls enabled");
+  console.log("[ArcadeNetworkClient] Local player spawned");
 
   var rotY = local.getEulerAngles().y;
   this.sendMove(spawnPosition, rotY, null);
@@ -201,6 +200,7 @@ ArcadeNetworkClient.prototype._enableLocalControlScripts = function (localEntity
   var scripts = localEntity.script;
   if (scripts.localPlayerController) {
     scripts.localPlayerController.enabled = true;
+    console.log("[ArcadeNetworkClient] Local player controller enabled");
   }
   if (scripts.characterController) {
     scripts.characterController.enabled = true;
