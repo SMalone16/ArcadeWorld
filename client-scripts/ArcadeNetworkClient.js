@@ -36,6 +36,12 @@ ArcadeNetworkClient.attributes.add("spawnPointsRoot", {
   title: "Spawn Points Root (SpawnPoints)"
 });
 
+ArcadeNetworkClient.attributes.add("enableOfflineFallback", {
+  type: "boolean",
+  default: true,
+  title: "Enable Offline Fallback"
+});
+
 ArcadeNetworkClient.prototype.initialize = function () {
   this.callbacks = {
     connected: [],
@@ -50,6 +56,7 @@ ArcadeNetworkClient.prototype.initialize = function () {
   this.client = null;
   this.lastNetworkError = "";
   this._hasBoundPlayers = false;
+  this._isOfflineMode = false;
 
   var cfg = window.ArcadeConfig || {};
   this._serverUrl = this.serverUrl || cfg.SERVER_URL || "";
@@ -91,12 +98,16 @@ ArcadeNetworkClient.prototype._validateRequiredAttributes = function () {
 
   if (!this._spawnPointsRoot) {
     console.error("[ArcadeNetworkClient] Missing spawnPointsRoot. Assign the SpawnPoints parent entity.");
-    hasError = true;
+    if (!this.enableOfflineFallback) {
+      hasError = true;
+    }
   }
 
   if (this._spawnPoints.length === 0) {
     console.error("[ArcadeNetworkClient] Spawn points missing. Ensure SpawnPoints has enabled child entities to use as spawn points.");
-    hasError = true;
+    if (!this.enableOfflineFallback) {
+      hasError = true;
+    }
   }
 
   return !hasError;
@@ -122,6 +133,7 @@ ArcadeNetworkClient.prototype._collectSpawnPoints = function () {
 ArcadeNetworkClient.prototype._connect = async function () {
   if (typeof Colyseus === "undefined") {
     console.error("[ArcadeNetworkClient] Colyseus client library missing.");
+    this._startOfflineFallback("colyseus missing");
     return;
   }
 
@@ -130,6 +142,7 @@ ArcadeNetworkClient.prototype._connect = async function () {
     this.room = await this.client.joinOrCreate(this._roomName);
   } catch (err) {
     console.error("[ArcadeNetworkClient] Join failed.", err);
+    this._startOfflineFallback("join failed");
     return;
   }
 
@@ -152,16 +165,30 @@ ArcadeNetworkClient.prototype._connect = async function () {
   }.bind(this));
 };
 
-ArcadeNetworkClient.prototype._spawnLocalPlayer = function () {
-  var local = this._resolvedLocalPlayerEntity;
-  if (!local || this._spawnPoints.length === 0) {
+ArcadeNetworkClient.prototype._startOfflineFallback = function (reason) {
+  if (!this.enableOfflineFallback || this._isOfflineMode) {
     return;
   }
 
-  var spawnEntity = this._selectSpawnPoint();
-  var spawnPosition = spawnEntity.getPosition().clone();
+  this._isOfflineMode = true;
+  console.warn("[ArcadeNetworkClient] Offline fallback enabled (" + reason + "). Local player remains playable.");
+  this._spawnLocalPlayer();
+};
 
-  console.log("[ArcadeNetworkClient] Selected spawn point: " + spawnEntity.name + " @", spawnPosition);
+ArcadeNetworkClient.prototype._spawnLocalPlayer = function () {
+  var local = this._resolvedLocalPlayerEntity;
+  if (!local) {
+    return;
+  }
+
+  var spawnPosition = local.getPosition().clone();
+  if (this._spawnPoints.length > 0) {
+    var spawnEntity = this._selectSpawnPoint();
+    spawnPosition = spawnEntity.getPosition().clone();
+    console.log("[ArcadeNetworkClient] Selected spawn point: " + spawnEntity.name + " @", spawnPosition);
+  } else {
+    console.warn("[ArcadeNetworkClient] No spawn points available. Keeping local player at current position.");
+  }
 
   local.setPosition(spawnPosition);
   local.enabled = true;
