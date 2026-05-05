@@ -42,11 +42,13 @@ For local server use `ws://localhost:2567`.
 ### A) Local player entity
 
 1. Create or pick your local player entity (example: `LocalPlayer`).
-2. Add a **Collision** component set to **Capsule**.
-3. Add a **Rigidbody** component set to **Dynamic**.
+2. Ensure LocalPlayer parent transform scale is exactly `1,1,1`.
+3. Add a **Collision** component set to **Capsule** (do not use Box for the movement body).
+4. Add a **Rigidbody** component set to **Dynamic**.
    - Lock rotation with angular factor `0,0,0` (prevents tipping/rolling in first-person).
-4. Attach `LocalPlayerController.js` script.
-3. In script attributes:
+5. Attach `LocalPlayerController.js` script.
+6. Keep visual render/model components on a child entity (not on the LocalPlayer parent physics body).
+7. In script attributes:
    - assign `networkManagerEntity` to the entity created in step B.
    - assign `cameraEntity` (or place camera as a child named `Camera`).
    - adjust `moveSpeed` if needed.
