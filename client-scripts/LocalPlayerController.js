@@ -79,6 +79,8 @@ LocalPlayerController.prototype.initialize = function () {
   this._right = new pc.Vec3();
   this._cameraOffset = new pc.Vec3();
   this._cameraWorldPos = new pc.Vec3();
+  this._targetVelocity = new pc.Vec3();
+  this._currentVelocity = new pc.Vec3();
 
   this._onMouseMoveBound = this._onMouseMove.bind(this);
   this._onMouseDownBound = this._onMouseDown.bind(this);
@@ -88,6 +90,7 @@ LocalPlayerController.prototype.initialize = function () {
 
   this._resolveNetworkClient();
   this._resolveCameraEntity();
+  this._validatePhysicsSetup();
 
   this.entity.setEulerAngles(0, this.yawDegrees, 0);
   this._applyCameraTransform();
@@ -134,20 +137,36 @@ LocalPlayerController.prototype._resolveCameraEntity = function () {
   }
 
   if (!this.cameraEntity) {
-    console.error("[LocalPlayerController] cameraEntity is missing. Assign it in editor or add a Camera entity.");
+    console.warn("[LocalPlayerController] Missing cameraEntity. Assign a camera child or camera entity reference.");
     return;
   }
 
   console.log("[LocalPlayerController] Camera assigned: " + this.cameraEntity.name);
 };
 
+LocalPlayerController.prototype._validatePhysicsSetup = function () {
+  if (!this.entity.collision) {
+    console.warn("[LocalPlayerController] Missing collision component. Expected a capsule collision for physics movement.");
+  }
+
+  if (!this.entity.rigidbody) {
+    console.warn("[LocalPlayerController] Missing rigidbody component. Expected a dynamic rigidbody for physics movement.");
+    return;
+  }
+
+  if (this.entity.rigidbody.type !== pc.BODYTYPE_DYNAMIC) {
+    console.warn("[LocalPlayerController] Rigidbody is not dynamic. Set rigidbody type to Dynamic.");
+  }
+
+  // Keep a standing FPS capsule from tipping over after collisions.
+  this.entity.rigidbody.angularFactor = pc.Vec3.ZERO;
+};
+
 LocalPlayerController.prototype._onEnable = function () {
   console.log("[LocalPlayerController] Input enabled");
 };
 
-LocalPlayerController.prototype._onDisable = function () {
-  // Keep listeners active for re-enable lifecycle; disable only changes update behavior.
-};
+LocalPlayerController.prototype._onDisable = function () {};
 
 LocalPlayerController.prototype._onDestroy = function () {
   if (this.app.mouse) {
@@ -166,13 +185,8 @@ LocalPlayerController.prototype._onMouseDown = function () {
 };
 
 LocalPlayerController.prototype._onMouseMove = function (event) {
-  if (!this.enabled) {
-    return;
-  }
-
-  if (this.enablePointerLock && !pc.Mouse.isPointerLocked()) {
-    return;
-  }
+  if (!this.enabled) return;
+  if (this.enablePointerLock && !pc.Mouse.isPointerLocked()) return;
 
   this.yawDegrees -= event.dx * this.mouseSensitivity;
   this.pitchDegrees -= event.dy * this.mouseSensitivity;
@@ -188,6 +202,17 @@ LocalPlayerController.prototype.update = function (dt) {
 
   this.entity.setEulerAngles(0, this.yawDegrees, 0);
 
+  this._updateMovementVelocity(dt);
+  this._applyCameraTransform();
+
+  this.sendTimer += dt;
+  if (this.sendTimer >= this.sendInterval) {
+    this.sendTimer = 0;
+    this._sendMoveState();
+  }
+};
+
+LocalPlayerController.prototype._updateMovementVelocity = function (_dt) {
   var horizontal = 0;
   var vertical = 0;
 
@@ -210,33 +235,29 @@ LocalPlayerController.prototype.update = function (dt) {
     this._move.add(this._forward.clone().scale(vertical));
     this._move.add(this._right.clone().scale(horizontal));
 
-    if (this._move.lengthSq() > 1) {
-      this._move.normalize();
-    }
-
-    this._move.scale(this.moveSpeed * dt);
-    this.entity.translate(this._move);
-
-    if (!this.hasLoggedFirstMovement) {
-      this.hasLoggedFirstMovement = true;
-      console.log("[LocalPlayerController] First movement detected");
-      this._sendMoveState();
-    }
+    if (this._move.lengthSq() > 1) this._move.normalize();
   }
 
-  this._applyCameraTransform();
+  this._targetVelocity.copy(this._move).scale(this.moveSpeed);
 
-  this.sendTimer += dt;
-  if (this.sendTimer >= this.sendInterval) {
-    this.sendTimer = 0;
+  if (!this.entity.rigidbody || this.entity.rigidbody.type !== pc.BODYTYPE_DYNAMIC) {
+    return;
+  }
+
+  this._currentVelocity.copy(this.entity.rigidbody.linearVelocity);
+  this._currentVelocity.x = this._targetVelocity.x;
+  this._currentVelocity.z = this._targetVelocity.z;
+  this.entity.rigidbody.linearVelocity = this._currentVelocity;
+
+  if (!this.hasLoggedFirstMovement && this._targetVelocity.lengthSq() > 0) {
+    this.hasLoggedFirstMovement = true;
+    console.log("[LocalPlayerController] First movement detected");
     this._sendMoveState();
   }
 };
 
 LocalPlayerController.prototype._applyCameraTransform = function () {
-  if (!this.cameraEntity) {
-    return;
-  }
+  if (!this.cameraEntity) return;
 
   this._cameraOffset.set(0, this.eyeHeight, this.cameraBackOffset);
 
@@ -253,10 +274,9 @@ LocalPlayerController.prototype._applyCameraTransform = function () {
 };
 
 LocalPlayerController.prototype._sendMoveState = function () {
-  if (!this.networkClient) {
-    return;
-  }
+  if (!this.networkClient) return;
 
   var pos = this.entity.getPosition();
-  this.networkClient.sendMove(pos, this.yawDegrees, this._playerName);
+  var name = this._playerName;
+  this.networkClient.sendMove(pos, this.yawDegrees, name);
 };

@@ -42,10 +42,15 @@ For local server use `ws://localhost:2567`.
 ### A) Local player entity
 
 1. Create or pick your local player entity (example: `LocalPlayer`).
-2. Attach `LocalPlayerController.js` script.
+2. Add a **Collision** component set to **Capsule**.
+3. Add a **Rigidbody** component set to **Dynamic**.
+   - Lock rotation with angular factor `0,0,0` (prevents tipping/rolling in first-person).
+4. Attach `LocalPlayerController.js` script.
 3. In script attributes:
    - assign `networkManagerEntity` to the entity created in step B.
+   - assign `cameraEntity` (or place camera as a child named `Camera`).
    - adjust `moveSpeed` if needed.
+   - optional: leave `enablePointerLock` enabled for FPS mouse look.
 
 ### B) Network manager entity
 
@@ -56,9 +61,24 @@ For local server use `ws://localhost:2567`.
    - set `serverUrl` (or keep empty and provide `window.ArcadeConfig.SERVER_URL`).
    - set `roomName` (or keep empty and provide `window.ArcadeConfig.ROOM_NAME`).
    - assign `playerTemplate` to your player prefab/template entity (**required**).
-   - optionally assign `remotePlayerManagerEntity` and `localPlayerEntity` for easier runtime diagnostics.
+   - assign `localPlayerEntity` to `LocalPlayer`.
+   - assign `spawnPointsRoot` to your `SpawnPoints` parent.
+   - `enableOfflineFallback` can stay enabled so local movement still works when server connection fails.
 4. In `RemotePlayerManager` attributes:
    - set `networkClientEntity` to this same `NetworkManager` entity.
+
+### C) Level colliders (walls/floor)
+
+For first-person physics collisions:
+- Walls/floors should have **Collision** + **Rigidbody (Static)**.
+- Local player moves via dynamic rigidbody velocity, so static colliders block motion correctly.
+
+### D) Remote player template rules
+
+- `RemotePlayerTemplate` should be visual-only for now.
+- Do **not** include `LocalPlayerController` on remote template clones.
+- Do **not** include a camera on the remote template.
+- Each browser client should have exactly one active local camera; remote players should never clone cameras.
 
 ## 5) Launch and verify
 
@@ -66,6 +86,7 @@ For local server use `ws://localhost:2567`.
 2. Open a second tab/device with same launch URL.
 3. Move local player with WASD.
 4. Verify remote placeholder avatar appears and updates.
+5. Verify local player collides with walls/floor (no pass-through).
 
 ## Troubleshooting
 
