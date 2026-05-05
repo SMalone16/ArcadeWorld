@@ -81,6 +81,7 @@ LocalPlayerController.prototype.initialize = function () {
   this._cameraWorldPos = new pc.Vec3();
   this._targetVelocity = new pc.Vec3();
   this._currentVelocity = new pc.Vec3();
+  this._yawQuat = new pc.Quat();
 
   this._onMouseMoveBound = this._onMouseMove.bind(this);
   this._onMouseDownBound = this._onMouseDown.bind(this);
@@ -92,7 +93,7 @@ LocalPlayerController.prototype.initialize = function () {
   this._resolveCameraEntity();
   this._validatePhysicsSetup();
 
-  this.entity.setEulerAngles(0, this.yawDegrees, 0);
+  this._applyBodyYaw();
   this._applyCameraTransform();
 
   if (this.app.mouse) {
@@ -200,7 +201,7 @@ LocalPlayerController.prototype.update = function (dt) {
     console.log("[LocalPlayerController] Pointer " + (pointerLockedNow ? "locked" : "unlocked"));
   }
 
-  this.entity.setEulerAngles(0, this.yawDegrees, 0);
+  this._applyBodyYaw();
 
   this._updateMovementVelocity(dt);
   this._applyCameraTransform();
@@ -224,13 +225,15 @@ LocalPlayerController.prototype._updateMovementVelocity = function (_dt) {
   this._move.set(0, 0, 0);
 
   if (horizontal !== 0 || vertical !== 0) {
-    this._forward.copy(this.entity.forward);
-    this._forward.y = 0;
-    if (this._forward.lengthSq() > 0) this._forward.normalize();
+    // The physics capsule is the movement body; compute intent from yaw directly
+    // so movement does not depend on transform vectors that can lag physics updates.
+    var yawRadians = this.yawDegrees * pc.math.DEG_TO_RAD;
+    var sinYaw = Math.sin(yawRadians);
+    var cosYaw = Math.cos(yawRadians);
 
-    this._right.copy(this.entity.right);
-    this._right.y = 0;
-    if (this._right.lengthSq() > 0) this._right.normalize();
+    // At yaw 0: forward (W) = world -Z, right (D) = world +X.
+    this._forward.set(-sinYaw, 0, -cosYaw);
+    this._right.set(cosYaw, 0, -sinYaw);
 
     this._move.add(this._forward.clone().scale(vertical));
     this._move.add(this._right.clone().scale(horizontal));
@@ -256,6 +259,17 @@ LocalPlayerController.prototype._updateMovementVelocity = function (_dt) {
   }
 };
 
+LocalPlayerController.prototype._applyBodyYaw = function () {
+  // Keep camera pitch on the child view while yaw is applied to the parent physics body.
+  if (!this.entity.rigidbody || this.entity.rigidbody.type !== pc.BODYTYPE_DYNAMIC) {
+    this.entity.setEulerAngles(0, this.yawDegrees, 0);
+    return;
+  }
+
+  this._yawQuat.setFromEulerAngles(0, this.yawDegrees, 0);
+  this.entity.rigidbody.teleport(this.entity.getPosition(), this._yawQuat);
+};
+
 LocalPlayerController.prototype._applyCameraTransform = function () {
   if (!this.cameraEntity) return;
 
@@ -263,6 +277,7 @@ LocalPlayerController.prototype._applyCameraTransform = function () {
 
   var isChild = this.cameraEntity.parent === this.entity;
   if (isChild) {
+    // Camera child is view-only: local pitch only, no local yaw/roll.
     this.cameraEntity.setLocalPosition(this._cameraOffset);
     this.cameraEntity.setLocalEulerAngles(this.pitchDegrees, 0, 0);
     return;
