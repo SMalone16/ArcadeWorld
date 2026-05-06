@@ -103,7 +103,6 @@ LocalPlayerController.prototype.initialize = function () {
   this.isGrounded = false;
   this.isChargingJump = false;
   this.jumpChargeTime = 0;
-
   this.yawDegrees = this.entity.getEulerAngles().y || 0;
   this.pitchDegrees = 0;
 
@@ -116,6 +115,7 @@ LocalPlayerController.prototype.initialize = function () {
   this._groundCheckEnd = new pc.Vec3();
   this._localMoveInput = new pc.Vec3();
   this._targetVelocity = new pc.Vec3();
+  this._localMoveInput = new pc.Vec3();
   this._currentVelocity = new pc.Vec3();
   this._yawQuat = new pc.Quat();
   this._lastAppliedYawDegrees = null;
@@ -254,81 +254,9 @@ LocalPlayerController.prototype.update = function (dt) {
   }
 };
 
-LocalPlayerController.prototype._updateGroundedState = function () {
-  this.isGrounded = false;
-
-  if (!this.entity.rigidbody || !this.app.systems.rigidbody) return;
-
-  this._groundCheckStart.copy(this.entity.getPosition());
-  this._groundCheckEnd.copy(this._groundCheckStart);
-  this._groundCheckEnd.y -= this._getGroundCheckDistance();
-
-  var hit = this.app.systems.rigidbody.raycastFirst(this._groundCheckStart, this._groundCheckEnd, {
-    filterCallback: this._groundRaycastFilterBound
-  });
-
-  this.isGrounded = !!hit;
-
-  if (!this.isGrounded && this.isChargingJump) {
-    this._cancelJumpCharge();
-  }
-};
-
-LocalPlayerController.prototype._getGroundCheckDistance = function () {
-  var bodyHalfHeight = 0.5;
-
-  if (this.entity.collision) {
-    if (typeof this.entity.collision.height === "number") {
-      bodyHalfHeight = this.entity.collision.height * 0.5;
-    } else if (this.entity.collision.halfExtents) {
-      bodyHalfHeight = this.entity.collision.halfExtents.y;
-    } else if (typeof this.entity.collision.radius === "number") {
-      bodyHalfHeight = this.entity.collision.radius;
-    }
-  }
-
-  return bodyHalfHeight + this.groundCheckExtraDistance;
-};
-
-LocalPlayerController.prototype._isValidGroundHit = function (entity) {
-  return entity !== this.entity;
-};
-
-LocalPlayerController.prototype._updateJumpCharge = function (dt) {
-  if (!this.app.keyboard || !this.entity.rigidbody || this.entity.rigidbody.type !== pc.BODYTYPE_DYNAMIC) {
-    return;
-  }
-
-  if (this.app.keyboard.wasPressed(pc.KEY_SPACE) && this.isGrounded) {
-    this.isChargingJump = true;
-    this.jumpChargeTime = 0;
-  }
-
-  if (this.isChargingJump && this.app.keyboard.isPressed(pc.KEY_SPACE)) {
-    this.jumpChargeTime += dt;
-    this.jumpChargeTime = Math.min(this.jumpChargeTime, this.maxJumpChargeTime);
-  }
-
-  if (this.isChargingJump && this.app.keyboard.wasReleased(pc.KEY_SPACE)) {
-    if (this.isGrounded) {
-      this._jumpFromCharge();
-    } else {
-      this._cancelJumpCharge();
-    }
-  }
-};
-
-LocalPlayerController.prototype._jumpFromCharge = function () {
-  var jumpHeight = this._getChargedJumpHeight(this.jumpChargeTime);
-  var jumpSpeed = this._getJumpSpeedForHeight(jumpHeight);
-  var velocity = this.entity.rigidbody.linearVelocity;
-
-  // Remove downward velocity before the impulse so every valid charge pops the
-  // cube off the floor, even if gravity/collisions nudged it downward.
-  if (velocity.y < 0) {
-    velocity.y = 0;
-    this.entity.rigidbody.linearVelocity = velocity;
-  }
+LocalPlayerController.prototype._updateMovementVelocity = function (_dt) {
+  this._readMovementInput();
+  this._buildYawRelativeMove();
 
   this.entity.rigidbody.applyImpulse(0, jumpSpeed * this.entity.rigidbody.mass, 0);
   this._cancelJumpCharge();
@@ -422,7 +350,6 @@ LocalPlayerController.prototype._applyBodyYaw = function () {
   }
 
   this._lastAppliedYawDegrees = this.yawDegrees;
-
   // Keep camera pitch on the child view while yaw is applied to the parent physics body.
   if (!this.entity.rigidbody || this.entity.rigidbody.type !== pc.BODYTYPE_DYNAMIC) {
     this.entity.setEulerAngles(0, this.yawDegrees, 0);
@@ -437,18 +364,15 @@ LocalPlayerController.prototype._applyBodyYaw = function () {
 LocalPlayerController.prototype._applyCameraTransform = function () {
   if (!this.cameraEntity) return;
 
-  this._cameraOffset.set(0, this.eyeHeight, this.cameraBackOffset);
+  // Place camera at the player's eye height.
+  this._cameraWorldPos.copy(this.entity.getPosition());
+  this._cameraWorldPos.y += this.eyeHeight;
 
-  var isChild = this.cameraEntity.parent === this.entity;
-  if (isChild) {
-    // Camera child is view-only: local pitch only, no local yaw/roll.
-    this.cameraEntity.setLocalPosition(this._cameraOffset);
-    this.cameraEntity.setLocalEulerAngles(this.pitchDegrees, 0, 0);
-    return;
-  }
-
-  this._cameraWorldPos.copy(this.entity.getPosition()).add(this._cameraOffset);
   this.cameraEntity.setPosition(this._cameraWorldPos);
+
+  // Drive the camera's full world rotation directly:
+  // yaw = left/right from parent body
+  // pitch = up/down from mouse Y
   this.cameraEntity.setEulerAngles(this.pitchDegrees, this.yawDegrees, 0);
 };
 
