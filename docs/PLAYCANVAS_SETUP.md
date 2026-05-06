@@ -9,6 +9,7 @@ Upload/copy these files from repo folder `client-scripts/`:
 - `ArcadeNetworkClient.js`
 - `LocalPlayerController.js`
 - `RemotePlayerManager.js`
+- `NetworkDebugOverlay.js`
 
 ## 2) Add Colyseus client library in PlayCanvas
 
@@ -60,15 +61,21 @@ For local server use `ws://localhost:2567`.
 1. Create an empty entity (example: `NetworkManager`).
 2. Attach `ArcadeNetworkClient.js` script.
 3. Attach `RemotePlayerManager.js` script.
-4. In `ArcadeNetworkClient` attributes:
+4. Attach `NetworkDebugOverlay.js` script while running multiplayer playtests. Remove or disable it when you no longer need debug text.
+5. In `ArcadeNetworkClient` attributes:
    - set `serverUrl` (or keep empty and provide `window.ArcadeConfig.SERVER_URL`).
    - set `roomName` (or keep empty and provide `window.ArcadeConfig.ROOM_NAME`).
    - assign `playerTemplate` to your player prefab/template entity (**required**).
    - assign `localPlayerEntity` to `LocalPlayer`.
    - assign `spawnPointsRoot` to your `SpawnPoints` parent.
    - `enableOfflineFallback` can stay enabled so local movement still works when server connection fails.
-4. In `RemotePlayerManager` attributes:
+6. In `RemotePlayerManager` attributes:
    - set `networkClientEntity` to this same `NetworkManager` entity.
+7. In `NetworkDebugOverlay` attributes:
+   - set `networkClientEntity` to this same `NetworkManager` entity.
+   - set `remotePlayerManagerEntity` to this same `NetworkManager` entity.
+
+The overlay should display `Connected`, `Session ID`, `Room name`, `Remote players visible`, `Last network error`, and `Server URL`. If both clients show `Connected: yes` but `Remote players visible: 0`, the room is live but remote spawn/update handling still needs investigation.
 
 ### C) Level colliders (walls/floor)
 
@@ -89,14 +96,16 @@ For first-person physics collisions:
 2. Open a second tab/device with same launch URL.
 3. Move local player with WASD.
 4. Hold and release **Space** to test the charged jump. A 1-second hold should produce the highest jump; shorter or longer holds should still lift the player, but not as high.
-5. Verify remote placeholder avatar appears and updates.
-6. Verify local player collides with walls/floor (no pass-through).
+5. Verify each client shows `Connected: yes`, a unique `Session ID`, matching `Room name` and `Server URL`, and `Remote players visible: 1` when exactly two clients are connected.
+6. Verify remote placeholder avatar appears and updates.
+7. Verify local player collides with walls/floor (no pass-through).
 
 ## Troubleshooting
 
-- If no connection: verify `SERVER_URL` is `wss://` and Codespaces port 2567 is visible.
+- If no connection: verify `SERVER_URL` is `wss://` and Codespaces port 2567 is visible. Check the debug overlay `Last network error` line first.
 - If scripts fail: verify Colyseus client script loaded first.
 - If local player does not move: confirm keyboard focus is on the game iframe/tab.
+- If both clients show `Connected: yes` but remote avatars are missing, compare `Remote players visible` across screens. A nonzero count means the manager spawned a remote entity that may be hidden, scaled incorrectly, or outside camera view; zero means the client did not receive/spawn remote state.
 - If you see `[ArcadeNetworkClient] Connection failed` with `Cannot read properties of undefined (reading 'onAdd')`: this means `room.state.players` is missing on the client. Re-upload the latest `ArcadeNetworkClient.js` (which guards before binding listeners) and confirm your server room calls `this.setState(new ArcadeWorldState())` and initializes `players` as a `MapSchema`.
 
 ## TODO (future)
