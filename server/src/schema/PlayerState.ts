@@ -11,6 +11,12 @@ export class PlayerState extends Schema {
   @type("string")
   name = "Player";
 
+  @type("string")
+  color = "#44aaff";
+
+  @type("string")
+  hatId = "No Hat";
+
   @type("number")
   x = 0;
 

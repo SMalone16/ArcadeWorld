@@ -16,6 +16,13 @@ ArcadeNetworkClient.attributes.add("roomName", {
   description: "Leave empty to use window.ArcadeConfig.ROOM_NAME"
 });
 
+ArcadeNetworkClient.attributes.add("autoConnect", {
+  type: "boolean",
+  default: true,
+  title: "Auto Connect",
+  description: "Connect immediately on initialize. Disable when using PregameOverlay."
+});
+
 ArcadeNetworkClient.attributes.add("playerTemplate", {
   type: "entity",
   title: "Player Prefab/Template (required for remotes)"
@@ -59,6 +66,8 @@ ArcadeNetworkClient.prototype.initialize = function () {
   this._remoteSessionIds = {};
   this._hasBoundPlayers = false;
   this._isOfflineMode = false;
+  this._isConnecting = false;
+  this.selectedProfile = null;
 
   var cfg = window.ArcadeConfig || {};
   this._serverUrl = this.serverUrl || cfg.SERVER_URL || "";
@@ -72,7 +81,11 @@ ArcadeNetworkClient.prototype.initialize = function () {
     return;
   }
 
-  this._connect();
+  if (this.autoConnect) {
+    this._connect();
+  } else {
+    console.log("[ArcadeNetworkClient] Auto connect disabled; waiting for pregame profile.");
+  }
 };
 
 ArcadeNetworkClient.prototype._validateRequiredAttributes = function () {
@@ -132,11 +145,26 @@ ArcadeNetworkClient.prototype._collectSpawnPoints = function () {
   return enabled;
 };
 
+ArcadeNetworkClient.prototype.connectWithProfile = async function (profile) {
+  this.selectedProfile = this._sanitizeProfile(profile);
+  return this._connect();
+};
+
 ArcadeNetworkClient.prototype._connect = async function () {
+  if (this.room || this._isConnecting) {
+    if (this.room && this.selectedProfile) {
+      this._sendProfile();
+      this._applyLocalProfile();
+    }
+    return this.room;
+  }
+
+  this._isConnecting = true;
   if (typeof Colyseus === "undefined") {
     this._setNetworkError("Colyseus client library missing.");
     this._startOfflineFallback("colyseus missing");
-    return;
+    this._isConnecting = false;
+    return null;
   }
 
   try {
@@ -145,7 +173,8 @@ ArcadeNetworkClient.prototype._connect = async function () {
   } catch (err) {
     this._setNetworkError("Join failed: " + this._formatError(err), err);
     this._startOfflineFallback("join failed");
-    return;
+    this._isConnecting = false;
+    return null;
   }
 
   this.sessionId = this.room.sessionId;
@@ -154,6 +183,7 @@ ArcadeNetworkClient.prototype._connect = async function () {
   console.log("[ArcadeNetworkClient] Joined room", this._roomName, this.sessionId);
   this._emit("connected", { sessionId: this.sessionId });
 
+  this._sendProfile();
   this._spawnLocalPlayer();
   this._bindStateListeners();
 
@@ -163,11 +193,15 @@ ArcadeNetworkClient.prototype._connect = async function () {
     }
   }.bind(this));
 
+  this._isConnecting = false;
+
   this.room.onLeave(function (code) {
     this.isConnected = false;
     this._setNetworkError("Left room with code " + code);
     this._emit("disconnected", { code: code });
   }.bind(this));
+
+  return this.room;
 };
 
 ArcadeNetworkClient.prototype._startOfflineFallback = function (reason) {
@@ -202,6 +236,7 @@ ArcadeNetworkClient.prototype._spawnLocalPlayer = function () {
   local.setPosition(spawnPosition);
   local.enabled = true;
   this._enableLocalControlScripts(local);
+  this._applyLocalProfile();
 
   console.log("[ArcadeNetworkClient] Local player spawned");
 
@@ -272,6 +307,9 @@ ArcadeNetworkClient.prototype._bindStateListeners = function () {
     playerCallbacks.listen("y", function () { self._emit("remoteUpdated", self._toPlayerPayload(player, sessionId)); });
     playerCallbacks.listen("z", function () { self._emit("remoteUpdated", self._toPlayerPayload(player, sessionId)); });
     playerCallbacks.listen("rotY", function () { self._emit("remoteUpdated", self._toPlayerPayload(player, sessionId)); });
+    playerCallbacks.listen("name", function () { self._emit("remoteUpdated", self._toPlayerPayload(player, sessionId)); });
+    playerCallbacks.listen("color", function () { self._emit("remoteUpdated", self._toPlayerPayload(player, sessionId)); });
+    playerCallbacks.listen("hatId", function () { self._emit("remoteUpdated", self._toPlayerPayload(player, sessionId)); });
   });
 
   stateCallbacks.players.onRemove(function (_player, sessionId) {
@@ -291,8 +329,47 @@ ArcadeNetworkClient.prototype._toPlayerPayload = function (player, sessionId) {
     y: player.y,
     z: player.z,
     rotY: typeof player.rotY === "number" ? player.rotY : (player.yaw || 0),
-    name: player.name
+    name: player.name,
+    color: player.color,
+    hatId: player.hatId
   };
+};
+
+ArcadeNetworkClient.prototype._sendProfile = function () {
+  if (!this.room || !this.selectedProfile) {
+    return;
+  }
+
+  this.room.send("profile", this.selectedProfile);
+};
+
+ArcadeNetworkClient.prototype._sanitizeProfile = function (profile) {
+  var safe = profile || {};
+  var name = typeof safe.name === "string" ? safe.name.trim().slice(0, 24) : "";
+  var color = typeof safe.color === "string" && /^#[0-9a-fA-F]{6}$/.test(safe.color) ? safe.color : "#44aaff";
+  var hatId = safe.hatId === "Top Hat" || safe.hatId === "Western" || safe.hatId === "No Hat" ? safe.hatId : "No Hat";
+
+  return {
+    name: name || "Player",
+    color: color,
+    hatId: hatId
+  };
+};
+
+ArcadeNetworkClient.prototype._applyLocalProfile = function () {
+  var local = this._resolvedLocalPlayerEntity;
+  if (!local || !this.selectedProfile) {
+    return;
+  }
+
+  if (local.script && local.script.playerAppearance && local.script.playerAppearance.applyProfile) {
+    local.script.playerAppearance.applyProfile(this.selectedProfile);
+    return;
+  }
+
+  if (window.ArcadePlayerAppearance && window.ArcadePlayerAppearance.applyToEntity) {
+    window.ArcadePlayerAppearance.applyToEntity(local, this.selectedProfile);
+  }
 };
 
 ArcadeNetworkClient.prototype.sendMove = function (position, rotY, name) {
@@ -326,7 +403,9 @@ ArcadeNetworkClient.prototype.getDebugSnapshot = function () {
     remotePlayersKnown: this.getRemotePlayerCount(),
     lastNetworkError: this.lastNetworkError || "",
     serverUrl: this._serverUrl || "",
-    offlineMode: this._isOfflineMode === true
+    offlineMode: this._isOfflineMode === true,
+    selectedProfile: this.selectedProfile || null,
+    autoConnect: this.autoConnect === true
   };
 };
 

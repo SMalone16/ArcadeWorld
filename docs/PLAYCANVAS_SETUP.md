@@ -9,6 +9,8 @@ Upload/copy these files from repo folder `client-scripts/`:
 - `ArcadeNetworkClient.js`
 - `LocalPlayerController.js`
 - `RemotePlayerManager.js`
+- `PlayerAppearance.js`
+- `PregameOverlay.js`
 - `NetworkDebugOverlay.js`
 
 ## 2) Add Colyseus client library in PlayCanvas
@@ -50,13 +52,21 @@ For local server use `ws://localhost:2567`.
 5. Attach `LocalPlayerController.js` script.
 6. Keep visual render/model components on a child entity (not on the LocalPlayer parent physics body).
 7. In script attributes:
-   - assign `networkManagerEntity` to the entity created in step B.
+   - assign `networkManagerEntity` to the `NetworkManager` entity created in step C.
    - assign `cameraEntity` (or place camera as a child named `Camera`).
    - adjust `moveSpeed` if needed.
    - tune jump feel with `minJumpHeight`, `maxJumpHeight`, and `idealJumpHoldTime` (default: hold **Space** for 1 second for the highest jump).
    - optional: leave `enablePointerLock` enabled for FPS mouse look.
 
-### B) Network manager entity
+### B) Pre-game UI entity
+
+1. Create an empty entity named `PregameUI`.
+2. Attach `PregameOverlay.js` script.
+3. Set `PregameOverlay.networkClientEntity` to the `NetworkManager` entity from the next section.
+4. At launch, this script creates a DOM overlay where players choose a display name, body color, and one of exactly `No Hat`, `Top Hat`, or `Western`.
+5. When the player clicks **Play**, the overlay stores the choices in browser `localStorage`, calls `ArcadeNetworkClient.connectWithProfile(profile)`, hides itself, and lets the network client spawn the local player.
+
+### C) Network manager entity
 
 1. Create an empty entity (example: `NetworkManager`).
 2. Attach `ArcadeNetworkClient.js` script.
@@ -65,46 +75,68 @@ For local server use `ws://localhost:2567`.
 5. In `ArcadeNetworkClient` attributes:
    - set `serverUrl` (or keep empty and provide `window.ArcadeConfig.SERVER_URL`).
    - set `roomName` (or keep empty and provide `window.ArcadeConfig.ROOM_NAME`).
+   - set `autoConnect=false` when using the `PregameUI` overlay. Leave the default `true` only for the old instant-join flow.
    - assign `playerTemplate` to your player prefab/template entity (**required**).
    - assign `localPlayerEntity` to `LocalPlayer`.
    - assign `spawnPointsRoot` to your `SpawnPoints` parent.
    - `enableOfflineFallback` can stay enabled so local movement still works when server connection fails.
 6. In `RemotePlayerManager` attributes:
    - set `networkClientEntity` to this same `NetworkManager` entity.
+   - set `nameplateHeightOffset` if your avatar is taller/shorter than the default 2.2 units.
 7. In `NetworkDebugOverlay` attributes:
    - set `networkClientEntity` to this same `NetworkManager` entity.
    - set `remotePlayerManagerEntity` to this same `NetworkManager` entity.
 
 The overlay should display `Connected`, `Session ID`, `Room name`, `Remote players visible`, `Last network error`, and `Server URL`. If both clients show `Connected: yes` but `Remote players visible: 0`, the room is live but remote spawn/update handling still needs investigation.
 
-### C) Level colliders (walls/floor)
+### D) Level colliders (walls/floor)
 
 For first-person physics collisions:
 - Walls/floors should have **Collision** + **Rigidbody (Static)**.
 - Local player moves via dynamic rigidbody velocity, so static colliders block motion correctly.
 
-### D) Remote player template rules
+### E) Remote player template and appearance rules
 
 - `RemotePlayerTemplate` should be visual-only for now.
 - Do **not** include `LocalPlayerController` on remote template clones.
 - Do **not** include a camera on the remote template.
 - Each browser client should have exactly one active local camera; remote players should never clone cameras.
+- Attach `PlayerAppearance.js` to the template root when possible, or rely on the shared helper loaded from `PlayerAppearance.js`.
+- Use this recommended hierarchy for remote visuals and any matching local-player visuals:
+
+```text
+RemotePlayerTemplate
+  NameTag
+  Visual
+    Body
+    Hats
+      No Hat
+      Top Hat
+      Western
+```
+
+- `Body` can use either a Render or Model component. The appearance helper clones body materials before tinting so different players do not share one material.
+- `Hats` children must use the exact editor names `No Hat`, `Top Hat`, and `Western`. Missing hat children log a warning instead of crashing.
+- Keep `No Hat` enabled by default. `Top Hat` and `Western` can be disabled by default or left for code to toggle at runtime.
+- Remote player nametags are DOM-based. They are projected above the remote entity by `RemotePlayerManager` and do not require the existing `NameTag` child to work.
 
 ## 5) Launch and verify
 
 1. Press **Launch** in PlayCanvas.
-2. Open a second tab/device with same launch URL.
-3. Move local player with WASD.
-4. Hold and release **Space** to test the charged jump. A 1-second hold should produce the highest jump; shorter or longer holds should still lift the player, but not as high.
-5. Verify each client shows `Connected: yes`, a unique `Session ID`, matching `Room name` and `Server URL`, and `Remote players visible: 1` when exactly two clients are connected.
-6. Verify remote placeholder avatar appears and updates.
-7. Verify local player collides with walls/floor (no pass-through).
+2. Enter a display name, choose a body color, choose `No Hat`, `Top Hat`, or `Western`, then click **Play**.
+3. Open a second tab/device with same launch URL and choose a different profile.
+4. Move local player with WASD.
+5. Hold and release **Space** to test the charged jump. A 1-second hold should produce the highest jump; shorter or longer holds should still lift the player, but not as high.
+6. Verify each client shows `Connected: yes`, a unique `Session ID`, matching `Room name` and `Server URL`, and `Remote players visible: 1` when exactly two clients are connected.
+7. Verify the remote avatar appears, updates, uses the selected body color/hat, and shows a DOM nametag above the character.
+8. Verify local player collides with walls/floor (no pass-through).
 
 ## Troubleshooting
 
 - If no connection: verify `SERVER_URL` is `wss://` and Codespaces port 2567 is visible. Check the debug overlay `Last network error` line first.
 - If scripts fail: verify Colyseus client script loaded first.
-- If local player does not move: confirm keyboard focus is on the game iframe/tab.
+- If local player does not move: confirm keyboard focus is on the game iframe/tab and that you clicked **Play** on the pre-game overlay.
+- If the pre-game overlay reports `ArcadeNetworkClient is missing`: confirm `PregameOverlay.networkClientEntity` points to `NetworkManager` and `NetworkManager` has `ArcadeNetworkClient.js` attached.
 - If both clients show `Connected: yes` but remote avatars are missing, compare `Remote players visible` across screens. A nonzero count means the manager spawned a remote entity that may be hidden, scaled incorrectly, or outside camera view; zero means the client did not receive/spawn remote state.
 - If you see `[ArcadeNetworkClient] Connection failed` with `Cannot read properties of undefined (reading 'onAdd')`: this means `room.state.players` is missing on the client. Re-upload the latest `ArcadeNetworkClient.js` (which guards before binding listeners) and confirm your server room calls `this.setState(new ArcadeWorldState())` and initializes `players` as a `MapSchema`.
 

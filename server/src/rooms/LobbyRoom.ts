@@ -11,6 +11,42 @@ type MovementMessage = {
   name?: string;
 };
 
+type ProfileMessage = {
+  name?: string;
+  color?: string;
+  hatId?: string;
+};
+
+const DEFAULT_COLOR = "#44aaff";
+const DEFAULT_HAT_ID = "No Hat";
+const SAFE_HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+const ALLOWED_HAT_IDS = new Set(["No Hat", "Top Hat", "Western"]);
+
+function sanitizeName(value: unknown, fallback: string): string {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const trimmed = value.trim().slice(0, 24);
+  return trimmed.length > 0 ? trimmed : fallback;
+}
+
+function sanitizeColor(value: unknown, fallback = DEFAULT_COLOR): string {
+  if (typeof value === "string" && SAFE_HEX_COLOR.test(value)) {
+    return value;
+  }
+
+  return fallback;
+}
+
+function sanitizeHatId(value: unknown, fallback = DEFAULT_HAT_ID): string {
+  if (typeof value === "string" && ALLOWED_HAT_IDS.has(value)) {
+    return value;
+  }
+
+  return fallback;
+}
+
 /**
  * Single shared room for today's vertical slice.
  * Room name: arcade_lobby
@@ -20,6 +56,17 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
 
   onCreate(): void {
     this.setState(new ArcadeWorldState());
+
+    this.onMessage("profile", (client, message: ProfileMessage) => {
+      const player = this.state.players.get(client.sessionId);
+      if (!player) {
+        return;
+      }
+
+      player.name = sanitizeName(message?.name, player.name);
+      player.color = sanitizeColor(message?.color, player.color);
+      player.hatId = sanitizeHatId(message?.hatId, player.hatId);
+    });
 
     this.onMessage("move", (client, message: MovementMessage) => {
       const player = this.state.players.get(client.sessionId);
@@ -51,9 +98,8 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
         player.rotY = rotY;
       }
 
-      if (typeof message.name === "string" && message.name.trim().length > 0) {
-        player.name = message.name.slice(0, 24);
-      }
+      // Backward compatibility for older clients that sent names with movement.
+      player.name = sanitizeName(message.name, player.name);
     });
 
     // Auto-dispose room once empty after a short delay.
@@ -67,6 +113,8 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     const player = new PlayerState();
     player.id = client.sessionId;
     player.name = `Player-${client.sessionId.slice(0, 4)}`;
+    player.color = DEFAULT_COLOR;
+    player.hatId = DEFAULT_HAT_ID;
     player.x = Math.random() * 4 - 2;
     player.y = 0;
     player.z = Math.random() * 4 - 2;
