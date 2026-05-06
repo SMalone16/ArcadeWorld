@@ -242,7 +242,9 @@ LocalPlayerController.prototype.update = function (dt) {
 
   this._applyBodyYaw();
 
+  this._updateGroundedState();
   this._updateMovementVelocity(dt);
+  this._updateJumpCharge(dt);
   this._applyCameraTransform();
 
   this.sendTimer += dt;
@@ -250,6 +252,36 @@ LocalPlayerController.prototype.update = function (dt) {
     this.sendTimer = 0;
     this._sendMoveState();
   }
+};
+
+LocalPlayerController.prototype._updateMovementVelocity = function (_dt) {
+  this._readMovementInput();
+  this._buildYawRelativeMove();
+
+  this.entity.rigidbody.applyImpulse(0, jumpSpeed * this.entity.rigidbody.mass, 0);
+  this._cancelJumpCharge();
+};
+
+LocalPlayerController.prototype._getChargedJumpHeight = function (holdTime) {
+  var safeIdealTime = Math.max(this.idealJumpHoldTime, 0.001);
+  var safeMaxHeight = Math.max(this.maxJumpHeight, this.minJumpHeight);
+  var normalizedDistanceFromIdeal = (holdTime - safeIdealTime) / safeIdealTime;
+  var curveAmount = 1 - normalizedDistanceFromIdeal * normalizedDistanceFromIdeal;
+  curveAmount = pc.math.clamp(curveAmount, 0, 1);
+
+  return this.minJumpHeight + (safeMaxHeight - this.minJumpHeight) * curveAmount;
+};
+
+LocalPlayerController.prototype._getJumpSpeedForHeight = function (height) {
+  var gravity = this.app.systems.rigidbody ? Math.abs(this.app.systems.rigidbody.gravity.y) : 9.81;
+  gravity = Math.max(gravity, 0.001);
+
+  return Math.sqrt(2 * gravity * height);
+};
+
+LocalPlayerController.prototype._cancelJumpCharge = function () {
+  this.isChargingJump = false;
+  this.jumpChargeTime = 0;
 };
 
 LocalPlayerController.prototype._updateMovementVelocity = function (_dt) {
