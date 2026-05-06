@@ -54,7 +54,9 @@ ArcadeNetworkClient.prototype.initialize = function () {
   this.sessionId = null;
   this.room = null;
   this.client = null;
+  this.isConnected = false;
   this.lastNetworkError = "";
+  this._remoteSessionIds = {};
   this._hasBoundPlayers = false;
   this._isOfflineMode = false;
 
@@ -77,34 +79,34 @@ ArcadeNetworkClient.prototype._validateRequiredAttributes = function () {
   var hasError = false;
 
   if (!this._serverUrl || !String(this._serverUrl).trim()) {
-    console.error("[ArcadeNetworkClient] Missing serverUrl. Assign serverUrl attribute or window.ArcadeConfig.SERVER_URL.");
+    this._setNetworkError("Missing serverUrl. Assign serverUrl attribute or window.ArcadeConfig.SERVER_URL.");
     hasError = true;
   }
 
   if (!this._roomName || !String(this._roomName).trim()) {
-    console.error("[ArcadeNetworkClient] Missing roomName. Assign roomName attribute or window.ArcadeConfig.ROOM_NAME.");
+    this._setNetworkError("Missing roomName. Assign roomName attribute or window.ArcadeConfig.ROOM_NAME.");
     hasError = true;
   }
 
   if (!this._resolvedLocalPlayerEntity) {
-    console.error("[ArcadeNetworkClient] Missing localPlayerEntity. Assign the controllable local player entity.");
+    this._setNetworkError("Missing localPlayerEntity. Assign the controllable local player entity.");
     hasError = true;
   }
 
   if (!this._resolvedPlayerTemplate) {
-    console.error("[ArcadeNetworkClient] Missing playerTemplate. Assign template/prefab entity for remote players.");
+    this._setNetworkError("Missing playerTemplate. Assign template/prefab entity for remote players.");
     hasError = true;
   }
 
   if (!this._spawnPointsRoot) {
-    console.error("[ArcadeNetworkClient] Missing spawnPointsRoot. Assign the SpawnPoints parent entity.");
+    this._setNetworkError("Missing spawnPointsRoot. Assign the SpawnPoints parent entity.");
     if (!this.enableOfflineFallback) {
       hasError = true;
     }
   }
 
   if (this._spawnPoints.length === 0) {
-    console.error("[ArcadeNetworkClient] Spawn points missing. Ensure SpawnPoints has enabled child entities to use as spawn points.");
+    this._setNetworkError("Spawn points missing. Ensure SpawnPoints has enabled child entities to use as spawn points.");
     if (!this.enableOfflineFallback) {
       hasError = true;
     }
@@ -132,7 +134,7 @@ ArcadeNetworkClient.prototype._collectSpawnPoints = function () {
 
 ArcadeNetworkClient.prototype._connect = async function () {
   if (typeof Colyseus === "undefined") {
-    console.error("[ArcadeNetworkClient] Colyseus client library missing.");
+    this._setNetworkError("Colyseus client library missing.");
     this._startOfflineFallback("colyseus missing");
     return;
   }
@@ -141,12 +143,14 @@ ArcadeNetworkClient.prototype._connect = async function () {
     this.client = new Colyseus.Client(this._serverUrl);
     this.room = await this.client.joinOrCreate(this._roomName);
   } catch (err) {
-    console.error("[ArcadeNetworkClient] Join failed.", err);
+    this._setNetworkError("Join failed: " + this._formatError(err), err);
     this._startOfflineFallback("join failed");
     return;
   }
 
   this.sessionId = this.room.sessionId;
+  this.isConnected = true;
+  this.lastNetworkError = "";
   console.log("[ArcadeNetworkClient] Joined room", this._roomName, this.sessionId);
   this._emit("connected", { sessionId: this.sessionId });
 
@@ -160,7 +164,8 @@ ArcadeNetworkClient.prototype._connect = async function () {
   }.bind(this));
 
   this.room.onLeave(function (code) {
-    console.warn("[ArcadeNetworkClient] Left room", code);
+    this.isConnected = false;
+    this._setNetworkError("Left room with code " + code);
     this._emit("disconnected", { code: code });
   }.bind(this));
 };
@@ -171,6 +176,10 @@ ArcadeNetworkClient.prototype._startOfflineFallback = function (reason) {
   }
 
   this._isOfflineMode = true;
+  this.isConnected = false;
+  if (!this.lastNetworkError) {
+    this.lastNetworkError = "Offline fallback: " + reason;
+  }
   console.warn("[ArcadeNetworkClient] Offline fallback enabled (" + reason + "). Local player remains playable.");
   this._spawnLocalPlayer();
 };
@@ -253,6 +262,9 @@ ArcadeNetworkClient.prototype._bindStateListeners = function () {
 
   stateCallbacks.players.onAdd(function (player, sessionId) {
     console.log("[ArcadeNetworkClient] Remote player added", sessionId);
+    if (sessionId !== self.sessionId) {
+      self._remoteSessionIds[sessionId] = true;
+    }
     self._emit("remoteAdded", self._toPlayerPayload(player, sessionId));
 
     var playerCallbacks = $(player);
@@ -264,6 +276,7 @@ ArcadeNetworkClient.prototype._bindStateListeners = function () {
 
   stateCallbacks.players.onRemove(function (_player, sessionId) {
     console.log("[ArcadeNetworkClient] Remote player removed", sessionId);
+    delete self._remoteSessionIds[sessionId];
     self._emit("remoteRemoved", { sessionId: sessionId });
   });
 
@@ -293,6 +306,49 @@ ArcadeNetworkClient.prototype.sendMove = function (position, rotY, name) {
     yaw: rotY,
     name: name
   });
+};
+
+ArcadeNetworkClient.prototype.getRemotePlayerCount = function () {
+  var count = 0;
+  for (var sessionId in this._remoteSessionIds) {
+    if (Object.prototype.hasOwnProperty.call(this._remoteSessionIds, sessionId)) {
+      count += 1;
+    }
+  }
+  return count;
+};
+
+ArcadeNetworkClient.prototype.getDebugSnapshot = function () {
+  return {
+    connected: this.isConnected === true && !!this.room && !this._isOfflineMode,
+    sessionId: this.sessionId || "",
+    roomName: this._roomName || "",
+    remotePlayersKnown: this.getRemotePlayerCount(),
+    lastNetworkError: this.lastNetworkError || "",
+    serverUrl: this._serverUrl || "",
+    offlineMode: this._isOfflineMode === true
+  };
+};
+
+ArcadeNetworkClient.prototype._setNetworkError = function (message, rawError) {
+  this.lastNetworkError = message || "Unknown network error";
+  if (rawError) {
+    console.error("[ArcadeNetworkClient] " + this.lastNetworkError, rawError);
+  } else {
+    console.error("[ArcadeNetworkClient] " + this.lastNetworkError);
+  }
+};
+
+ArcadeNetworkClient.prototype._formatError = function (err) {
+  if (!err) {
+    return "unknown error";
+  }
+
+  if (err.message) {
+    return err.message;
+  }
+
+  return String(err);
 };
 
 ArcadeNetworkClient.prototype.onEvent = function (eventName, callback) {

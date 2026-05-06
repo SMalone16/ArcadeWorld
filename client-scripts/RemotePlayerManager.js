@@ -92,6 +92,16 @@ RemotePlayerManager.prototype._onRemoteUpdated = function (data) {
   remote.setEulerAngles(0, (typeof data.rotY === "number" ? data.rotY : (data.yaw || 0)), 0);
 };
 
+RemotePlayerManager.prototype.getVisibleRemoteCount = function () {
+  var count = 0;
+  for (var sessionId in this.remoteEntities) {
+    if (Object.prototype.hasOwnProperty.call(this.remoteEntities, sessionId)) {
+      count += 1;
+    }
+  }
+  return count;
+};
+
 RemotePlayerManager.prototype._onRemoteRemoved = function (data) {
   var remote = this.remoteEntities[data.sessionId];
   if (!remote) {
