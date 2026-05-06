@@ -115,7 +115,6 @@ LocalPlayerController.prototype.initialize = function () {
   this._groundCheckEnd = new pc.Vec3();
   this._localMoveInput = new pc.Vec3();
   this._targetVelocity = new pc.Vec3();
-  this._localMoveInput = new pc.Vec3();
   this._currentVelocity = new pc.Vec3();
   this._yawQuat = new pc.Quat();
   this._lastAppliedYawDegrees = null;
@@ -254,29 +253,150 @@ LocalPlayerController.prototype.update = function (dt) {
   }
 };
 
-LocalPlayerController.prototype._updateMovementVelocity = function (_dt) {
-  this._readMovementInput();
-  this._buildYawRelativeMove();
+LocalPlayerController.prototype._updateGroundedState = function () {
+  var rigidbodySystem = this.app && this.app.systems ? this.app.systems.rigidbody : null;
+  if (!rigidbodySystem || !rigidbodySystem.raycastFirst) {
+    if (!this._hasWarnedMissingRaycast) {
+      this._hasWarnedMissingRaycast = true;
+      console.warn("[LocalPlayerController] Rigidbody system raycast is unavailable. Ground checks and jumping are disabled.");
+    }
+    this.isGrounded = false;
+    this._cancelJumpCharge();
+    return;
+  }
 
-  this.entity.rigidbody.applyImpulse(0, jumpSpeed * this.entity.rigidbody.mass, 0);
+  this._groundCheckStart.copy(this.entity.getPosition());
+  this._groundCheckEnd.copy(this._groundCheckStart);
+  this._groundCheckEnd.y -= this._getGroundCheckDistance();
+
+  var hit = rigidbodySystem.raycastFirst(this._groundCheckStart, this._groundCheckEnd, {
+    filterCallback: this._groundRaycastFilterBound
+  });
+
+  this.isGrounded = !!hit;
+
+  if (!this.isGrounded && this.isChargingJump) {
+    this._cancelJumpCharge();
+  }
+};
+
+LocalPlayerController.prototype._getGroundCheckDistance = function () {
+  var extraDistance = Math.max(this.groundCheckExtraDistance || 0, 0);
+
+  if (!this.entity.collision) {
+    if (!this._hasWarnedMissingGroundCollision) {
+      this._hasWarnedMissingGroundCollision = true;
+      console.warn("[LocalPlayerController] Missing collision component. Using fallback ground check distance.");
+    }
+    return 1 + extraDistance;
+  }
+
+  if (typeof this.entity.collision.height === "number") {
+    return Math.max(this.entity.collision.height * 0.5 + extraDistance, extraDistance);
+  }
+
+  if (typeof this.entity.collision.radius === "number") {
+    return this.entity.collision.radius + extraDistance;
+  }
+
+  return 1 + extraDistance;
+};
+
+LocalPlayerController.prototype._isValidGroundHit = function (entity) {
+  if (!entity) return false;
+  if (entity === this.entity) return false;
+
+  var parent = entity.parent;
+  while (parent) {
+    if (parent === this.entity) return false;
+    parent = parent.parent;
+  }
+
+  return true;
+};
+
+LocalPlayerController.prototype._updateJumpCharge = function (dt) {
+  if (!this.app.keyboard) {
+    if (this.isChargingJump) {
+      this._cancelJumpCharge();
+    }
+    return;
+  }
+
+  var isSpaceDown = this.app.keyboard.isPressed(pc.KEY_SPACE);
+  var wasSpacePressed = this.app.keyboard.wasPressed ? this.app.keyboard.wasPressed(pc.KEY_SPACE) : false;
+  var wasSpaceReleased = this.app.keyboard.wasReleased ? this.app.keyboard.wasReleased(pc.KEY_SPACE) : false;
+
+  if (!this.isGrounded) {
+    if (this.isChargingJump) {
+      this._cancelJumpCharge();
+    }
+    return;
+  }
+
+  if (!this.isChargingJump && wasSpacePressed) {
+    this.isChargingJump = true;
+    this.jumpChargeTime = 0;
+  }
+
+  if (!this.isChargingJump) {
+    return;
+  }
+
+  if (isSpaceDown) {
+    var safeMaxChargeTime = Math.max(this.maxJumpChargeTime || 0, 0);
+    this.jumpChargeTime = Math.min(this.jumpChargeTime + dt, safeMaxChargeTime);
+  }
+
+  if (wasSpaceReleased || !isSpaceDown) {
+    this._jumpFromCharge();
+  }
+};
+
+LocalPlayerController.prototype._jumpFromCharge = function () {
+  if (!this.isGrounded) {
+    this._cancelJumpCharge();
+    return;
+  }
+
+  if (!this.entity.rigidbody || this.entity.rigidbody.type !== pc.BODYTYPE_DYNAMIC) {
+    if (!this._hasWarnedMissingJumpRigidbody) {
+      this._hasWarnedMissingJumpRigidbody = true;
+      console.warn("[LocalPlayerController] Missing dynamic rigidbody. Charged jump cannot be applied.");
+    }
+    this._cancelJumpCharge();
+    return;
+  }
+
+  var jumpHeight = this._getChargedJumpHeight(this.jumpChargeTime);
+  var jumpSpeed = this._getJumpSpeedForHeight(jumpHeight);
+
+  this._currentVelocity.copy(this.entity.rigidbody.linearVelocity);
+  this._currentVelocity.y = jumpSpeed;
+  this.entity.rigidbody.linearVelocity = this._currentVelocity;
+
+  this.isGrounded = false;
   this._cancelJumpCharge();
 };
 
 LocalPlayerController.prototype._getChargedJumpHeight = function (holdTime) {
+  var safeMinHeight = Math.max(this.minJumpHeight, 0);
+  var safeMaxHeight = Math.max(this.maxJumpHeight, safeMinHeight);
   var safeIdealTime = Math.max(this.idealJumpHoldTime, 0.001);
-  var safeMaxHeight = Math.max(this.maxJumpHeight, this.minJumpHeight);
-  var normalizedDistanceFromIdeal = (holdTime - safeIdealTime) / safeIdealTime;
+  var clampedHoldTime = Math.max(holdTime || 0, 0);
+  var normalizedDistanceFromIdeal = (clampedHoldTime - safeIdealTime) / safeIdealTime;
   var curveAmount = 1 - normalizedDistanceFromIdeal * normalizedDistanceFromIdeal;
   curveAmount = pc.math.clamp(curveAmount, 0, 1);
 
-  return this.minJumpHeight + (safeMaxHeight - this.minJumpHeight) * curveAmount;
+  return safeMinHeight + (safeMaxHeight - safeMinHeight) * curveAmount;
 };
 
 LocalPlayerController.prototype._getJumpSpeedForHeight = function (height) {
-  var gravity = this.app.systems.rigidbody ? Math.abs(this.app.systems.rigidbody.gravity.y) : 9.81;
+  var rigidbodySystem = this.app && this.app.systems ? this.app.systems.rigidbody : null;
+  var gravity = rigidbodySystem && rigidbodySystem.gravity ? Math.abs(rigidbodySystem.gravity.y) : 9.81;
   gravity = Math.max(gravity, 0.001);
 
-  return Math.sqrt(2 * gravity * height);
+  return Math.sqrt(2 * gravity * Math.max(height, 0));
 };
 
 LocalPlayerController.prototype._cancelJumpCharge = function () {
