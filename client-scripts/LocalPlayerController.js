@@ -18,6 +18,36 @@ LocalPlayerController.attributes.add("moveSpeed", {
   title: "Move Speed"
 });
 
+LocalPlayerController.attributes.add("minJumpHeight", {
+  type: "number",
+  default: 0.35,
+  title: "Minimum Jump Height"
+});
+
+LocalPlayerController.attributes.add("maxJumpHeight", {
+  type: "number",
+  default: 2,
+  title: "Maximum Jump Height"
+});
+
+LocalPlayerController.attributes.add("idealJumpHoldTime", {
+  type: "number",
+  default: 1,
+  title: "Ideal Jump Hold Time"
+});
+
+LocalPlayerController.attributes.add("maxJumpChargeTime", {
+  type: "number",
+  default: 2,
+  title: "Maximum Jump Charge Time"
+});
+
+LocalPlayerController.attributes.add("groundCheckExtraDistance", {
+  type: "number",
+  default: 0.15,
+  title: "Ground Check Extra Distance"
+});
+
 LocalPlayerController.attributes.add("mouseSensitivity", {
   type: "number",
   default: 0.15,
@@ -70,6 +100,9 @@ LocalPlayerController.prototype.initialize = function () {
   this.networkClient = null;
   this.sendTimer = 0;
   this.hasLoggedFirstMovement = false;
+  this.isGrounded = false;
+  this.isChargingJump = false;
+  this.jumpChargeTime = 0;
 
   this.yawDegrees = this.entity.getEulerAngles().y || 0;
   this.pitchDegrees = 0;
@@ -79,9 +112,14 @@ LocalPlayerController.prototype.initialize = function () {
   this._right = new pc.Vec3();
   this._cameraOffset = new pc.Vec3();
   this._cameraWorldPos = new pc.Vec3();
+  this._groundCheckStart = new pc.Vec3();
+  this._groundCheckEnd = new pc.Vec3();
+  this._localMoveInput = new pc.Vec3();
   this._targetVelocity = new pc.Vec3();
   this._currentVelocity = new pc.Vec3();
   this._yawQuat = new pc.Quat();
+  this._lastAppliedYawDegrees = null;
+  this._groundRaycastFilterBound = this._isValidGroundHit.bind(this);
 
   this._onMouseMoveBound = this._onMouseMove.bind(this);
   this._onMouseDownBound = this._onMouseDown.bind(this);
@@ -161,6 +199,7 @@ LocalPlayerController.prototype._validatePhysicsSetup = function () {
 
   // Keep a standing FPS capsule from tipping over after collisions.
   this.entity.rigidbody.angularFactor = pc.Vec3.ZERO;
+  this.entity.rigidbody.angularVelocity = pc.Vec3.ZERO;
 };
 
 LocalPlayerController.prototype._onEnable = function () {
@@ -203,7 +242,9 @@ LocalPlayerController.prototype.update = function (dt) {
 
   this._applyBodyYaw();
 
+  this._updateGroundedState();
   this._updateMovementVelocity(dt);
+  this._updateJumpCharge(dt);
   this._applyCameraTransform();
 
   this.sendTimer += dt;
@@ -213,33 +254,111 @@ LocalPlayerController.prototype.update = function (dt) {
   }
 };
 
-LocalPlayerController.prototype._updateMovementVelocity = function (_dt) {
-  var horizontal = 0;
-  var vertical = 0;
+LocalPlayerController.prototype._updateGroundedState = function () {
+  this.isGrounded = false;
 
-  if (this.app.keyboard.isPressed(pc.KEY_A)) horizontal -= 1;
-  if (this.app.keyboard.isPressed(pc.KEY_D)) horizontal += 1;
-  if (this.app.keyboard.isPressed(pc.KEY_W)) vertical += 1;
-  if (this.app.keyboard.isPressed(pc.KEY_S)) vertical -= 1;
+  if (!this.entity.rigidbody || !this.app.systems.rigidbody) return;
 
-  this._move.set(0, 0, 0);
+  this._groundCheckStart.copy(this.entity.getPosition());
+  this._groundCheckEnd.copy(this._groundCheckStart);
+  this._groundCheckEnd.y -= this._getGroundCheckDistance();
 
-  if (horizontal !== 0 || vertical !== 0) {
-    // The physics capsule is the movement body; compute intent from yaw directly
-    // so movement does not depend on transform vectors that can lag physics updates.
-    var yawRadians = this.yawDegrees * pc.math.DEG_TO_RAD;
-    var sinYaw = Math.sin(yawRadians);
-    var cosYaw = Math.cos(yawRadians);
+  var hit = this.app.systems.rigidbody.raycastFirst(this._groundCheckStart, this._groundCheckEnd, {
+    filterCallback: this._groundRaycastFilterBound
+  });
 
-    // At yaw 0: forward (W) = world -Z, right (D) = world +X.
-    this._forward.set(-sinYaw, 0, -cosYaw);
-    this._right.set(cosYaw, 0, -sinYaw);
+  this.isGrounded = !!hit;
 
-    this._move.add(this._forward.clone().scale(vertical));
-    this._move.add(this._right.clone().scale(horizontal));
-
-    if (this._move.lengthSq() > 1) this._move.normalize();
+  if (!this.isGrounded && this.isChargingJump) {
+    this._cancelJumpCharge();
   }
+};
+
+LocalPlayerController.prototype._getGroundCheckDistance = function () {
+  var bodyHalfHeight = 0.5;
+
+  if (this.entity.collision) {
+    if (typeof this.entity.collision.height === "number") {
+      bodyHalfHeight = this.entity.collision.height * 0.5;
+    } else if (this.entity.collision.halfExtents) {
+      bodyHalfHeight = this.entity.collision.halfExtents.y;
+    } else if (typeof this.entity.collision.radius === "number") {
+      bodyHalfHeight = this.entity.collision.radius;
+    }
+  }
+
+  return bodyHalfHeight + this.groundCheckExtraDistance;
+};
+
+LocalPlayerController.prototype._isValidGroundHit = function (entity) {
+  return entity !== this.entity;
+};
+
+LocalPlayerController.prototype._updateJumpCharge = function (dt) {
+  if (!this.app.keyboard || !this.entity.rigidbody || this.entity.rigidbody.type !== pc.BODYTYPE_DYNAMIC) {
+    return;
+  }
+
+  if (this.app.keyboard.wasPressed(pc.KEY_SPACE) && this.isGrounded) {
+    this.isChargingJump = true;
+    this.jumpChargeTime = 0;
+  }
+
+  if (this.isChargingJump && this.app.keyboard.isPressed(pc.KEY_SPACE)) {
+    this.jumpChargeTime += dt;
+    this.jumpChargeTime = Math.min(this.jumpChargeTime, this.maxJumpChargeTime);
+  }
+
+  if (this.isChargingJump && this.app.keyboard.wasReleased(pc.KEY_SPACE)) {
+    if (this.isGrounded) {
+      this._jumpFromCharge();
+    } else {
+      this._cancelJumpCharge();
+    }
+  }
+};
+
+LocalPlayerController.prototype._jumpFromCharge = function () {
+  var jumpHeight = this._getChargedJumpHeight(this.jumpChargeTime);
+  var jumpSpeed = this._getJumpSpeedForHeight(jumpHeight);
+  var velocity = this.entity.rigidbody.linearVelocity;
+
+  // Remove downward velocity before the impulse so every valid charge pops the
+  // cube off the floor, even if gravity/collisions nudged it downward.
+  if (velocity.y < 0) {
+    velocity.y = 0;
+    this.entity.rigidbody.linearVelocity = velocity;
+  }
+
+  this.entity.rigidbody.applyImpulse(0, jumpSpeed * this.entity.rigidbody.mass, 0);
+  this._cancelJumpCharge();
+};
+
+LocalPlayerController.prototype._getChargedJumpHeight = function (holdTime) {
+  var safeIdealTime = Math.max(this.idealJumpHoldTime, 0.001);
+  var safeMaxHeight = Math.max(this.maxJumpHeight, this.minJumpHeight);
+  var normalizedDistanceFromIdeal = (holdTime - safeIdealTime) / safeIdealTime;
+  var curveAmount = 1 - normalizedDistanceFromIdeal * normalizedDistanceFromIdeal;
+  curveAmount = pc.math.clamp(curveAmount, 0, 1);
+
+  return this.minJumpHeight + (safeMaxHeight - this.minJumpHeight) * curveAmount;
+};
+
+LocalPlayerController.prototype._getJumpSpeedForHeight = function (height) {
+  var gravity = this.app.systems.rigidbody ? Math.abs(this.app.systems.rigidbody.gravity.y) : 9.81;
+  gravity = Math.max(gravity, 0.001);
+
+  return Math.sqrt(2 * gravity * height);
+};
+
+LocalPlayerController.prototype._cancelJumpCharge = function () {
+  this.isChargingJump = false;
+  this.jumpChargeTime = 0;
+};
+
+LocalPlayerController.prototype._updateMovementVelocity = function (_dt) {
+  this._readMovementInput();
+  this._buildYawRelativeMove();
 
   this._targetVelocity.copy(this._move).scale(this.moveSpeed);
 
@@ -259,7 +378,51 @@ LocalPlayerController.prototype._updateMovementVelocity = function (_dt) {
   }
 };
 
+LocalPlayerController.prototype._readMovementInput = function () {
+  this._localMoveInput.set(0, 0, 0);
+
+  if (!this.app.keyboard) return;
+
+  if (this.app.keyboard.isPressed(pc.KEY_A)) this._localMoveInput.x -= 1;
+  if (this.app.keyboard.isPressed(pc.KEY_D)) this._localMoveInput.x += 1;
+  if (this.app.keyboard.isPressed(pc.KEY_W)) this._localMoveInput.z -= 1;
+  if (this.app.keyboard.isPressed(pc.KEY_S)) this._localMoveInput.z += 1;
+
+  if (this._localMoveInput.lengthSq() > 1) {
+    this._localMoveInput.normalize();
+  }
+};
+
+LocalPlayerController.prototype._buildYawRelativeMove = function () {
+  this._move.set(0, 0, 0);
+
+  if (this._localMoveInput.lengthSq() === 0) return;
+
+  // Movement is based on body yaw only. Pitch stays on the camera child, so
+  // looking up/down never makes the capsule climb or dive.
+  var yawRadians = this.yawDegrees * pc.math.DEG_TO_RAD;
+  var sinYaw = Math.sin(yawRadians);
+  var cosYaw = Math.cos(yawRadians);
+
+  // At yaw 0: W = world -Z, S = world +Z, D = world +X, A = world -X.
+  this._forward.set(-sinYaw, 0, -cosYaw);
+  this._right.set(cosYaw, 0, -sinYaw);
+
+  this._move.copy(this._forward).scale(-this._localMoveInput.z);
+  this._move.add(this._right.scale(this._localMoveInput.x));
+
+  if (this._move.lengthSq() > 1) {
+    this._move.normalize();
+  }
+};
+
 LocalPlayerController.prototype._applyBodyYaw = function () {
+  if (this._lastAppliedYawDegrees === this.yawDegrees) {
+    return;
+  }
+
+  this._lastAppliedYawDegrees = this.yawDegrees;
+
   // Keep camera pitch on the child view while yaw is applied to the parent physics body.
   if (!this.entity.rigidbody || this.entity.rigidbody.type !== pc.BODYTYPE_DYNAMIC) {
     this.entity.setEulerAngles(0, this.yawDegrees, 0);
@@ -268,6 +431,7 @@ LocalPlayerController.prototype._applyBodyYaw = function () {
 
   this._yawQuat.setFromEulerAngles(0, this.yawDegrees, 0);
   this.entity.rigidbody.teleport(this.entity.getPosition(), this._yawQuat);
+  this.entity.rigidbody.angularVelocity = pc.Vec3.ZERO;
 };
 
 LocalPlayerController.prototype._applyCameraTransform = function () {

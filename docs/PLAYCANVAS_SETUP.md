@@ -52,6 +52,7 @@ For local server use `ws://localhost:2567`.
    - assign `networkManagerEntity` to the entity created in step B.
    - assign `cameraEntity` (or place camera as a child named `Camera`).
    - adjust `moveSpeed` if needed.
+   - tune jump feel with `minJumpHeight`, `maxJumpHeight`, and `idealJumpHoldTime` (default: hold **Space** for 1 second for the highest jump).
    - optional: leave `enablePointerLock` enabled for FPS mouse look.
 
 ### B) Network manager entity
@@ -87,8 +88,9 @@ For first-person physics collisions:
 1. Press **Launch** in PlayCanvas.
 2. Open a second tab/device with same launch URL.
 3. Move local player with WASD.
-4. Verify remote placeholder avatar appears and updates.
-5. Verify local player collides with walls/floor (no pass-through).
+4. Hold and release **Space** to test the charged jump. A 1-second hold should produce the highest jump; shorter or longer holds should still lift the player, but not as high.
+5. Verify remote placeholder avatar appears and updates.
+6. Verify local player collides with walls/floor (no pass-through).
 
 ## Troubleshooting
 
