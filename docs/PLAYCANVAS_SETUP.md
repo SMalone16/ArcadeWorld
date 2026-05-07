@@ -64,7 +64,8 @@ For local server use `ws://localhost:2567`.
 2. Attach `PregameOverlay.js` script.
 3. Set `PregameOverlay.networkClientEntity` to the `NetworkManager` entity from the next section.
 4. At launch, this script creates a DOM overlay where players choose a display name, body color, and one of exactly `No Hat`, `Top Hat`, or `Western`.
-5. When the player clicks **Play**, the overlay stores the choices in browser `localStorage`, calls `ArcadeNetworkClient.connectWithProfile(profile)`, hides itself, and lets the network client spawn the local player.
+5. While the overlay is visible, Arcade World stays in the `onboarding` state: pointer lock is released, overlay clicks/typing stay on the DOM UI, and `LocalPlayerController` ignores mouse look and movement input.
+6. When the player clicks **Play**, the overlay reads the current input value, trims it (falling back to `Student` only if empty), stores `{ name, color, hatId }` in browser `localStorage` and app state, fires `arcade:profileReady` / `arcade:startGame`, switches the game state to `playing`, requests pointer lock once from that button click, then calls `ArcadeNetworkClient.connectWithProfile(profile)`.
 
 ### C) Network manager entity
 
@@ -123,7 +124,7 @@ RemotePlayerTemplate
 ## 5) Launch and verify
 
 1. Press **Launch** in PlayCanvas.
-2. Enter a display name, choose a body color, choose `No Hat`, `Top Hat`, or `Western`, then click **Play**.
+2. Confirm the cursor remains visible and mouse movement does not rotate the camera while the overlay is open. Enter a display name, choose a body color, choose `No Hat`, `Top Hat`, or `Western`, then click **Play**.
 3. Open a second tab/device with same launch URL and choose a different profile.
 4. Move local player with WASD.
 5. Hold and release **Space** to test the charged jump. A 1-second hold should produce the highest jump; shorter or longer holds should still lift the player, but not as high.
@@ -135,7 +136,7 @@ RemotePlayerTemplate
 
 - If no connection: verify `SERVER_URL` is `wss://` and Codespaces port 2567 is visible. Check the debug overlay `Last network error` line first.
 - If scripts fail: verify Colyseus client script loaded first.
-- If local player does not move: confirm keyboard focus is on the game iframe/tab and that you clicked **Play** on the pre-game overlay.
+- If local player does not move: confirm keyboard focus is on the game iframe/tab, `ArcadeNetworkClient.autoConnect=false` when using `PregameUI`, and that you clicked **Play** so the app reaches the `playing` state.
 - If the pre-game overlay reports `ArcadeNetworkClient is missing`: confirm `PregameOverlay.networkClientEntity` points to `NetworkManager` and `NetworkManager` has `ArcadeNetworkClient.js` attached.
 - If both clients show `Connected: yes` but remote avatars are missing, compare `Remote players visible` across screens. A nonzero count means the manager spawned a remote entity that may be hidden, scaled incorrectly, or outside camera view; zero means the client did not receive/spawn remote state.
 - If you see `[ArcadeNetworkClient] Connection failed` with `Cannot read properties of undefined (reading 'onAdd')`: this means `room.state.players` is missing on the client. Re-upload the latest `ArcadeNetworkClient.js` (which guards before binding listeners) and confirm your server room calls `this.setState(new ArcadeWorldState())` and initializes `players` as a `MapSchema`.

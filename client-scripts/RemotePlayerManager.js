@@ -139,7 +139,7 @@ RemotePlayerManager.prototype._sanitizeProfile = function (data) {
   var hatId = data.hatId === "Top Hat" || data.hatId === "Western" || data.hatId === "No Hat" ? data.hatId : "No Hat";
 
   return {
-    name: name || "Player",
+    name: name || "Student",
     color: color,
     hatId: hatId
   };

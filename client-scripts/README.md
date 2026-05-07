@@ -22,8 +22,8 @@ These scripts are designed to be copied/uploaded into your **existing PlayCanvas
 
 ## Pre-game customization setup
 
-- `PregameOverlay.js` shows a simple DOM panel before joining the Colyseus room. Students can enter a display name, choose a safe hex body color, and select exactly `No Hat`, `Top Hat`, or `Western`.
-- `ArcadeNetworkClient.autoConnect` defaults to `true` for backward compatibility. Leave it enabled for the old instant-join flow; disable it only when using the pre-game overlay.
+- `PregameOverlay.js` shows a simple DOM panel before joining the Colyseus room. Students can enter a display name, choose a safe hex body color, and select exactly `No Hat`, `Top Hat`, or `Western`. While it is open, the app is in `onboarding`: the cursor stays visible, pointer lock is released, and gameplay mouse/keyboard input is ignored.
+- `ArcadeNetworkClient.autoConnect` defaults to `true` for backward compatibility. Leave it enabled for the old instant-join flow; disable it when using the pre-game overlay so **Play** is the only action that switches to `playing`, requests pointer lock, and sends the selected profile.
 - Add `PlayerAppearance.js` to local and remote visual entities when possible. `RemotePlayerManager` also calls the shared `window.ArcadePlayerAppearance.applyToEntity` helper if the script is not attached.
 - Recommended visual hierarchy for both `RemotePlayerTemplate` and any visible local-player model:
 

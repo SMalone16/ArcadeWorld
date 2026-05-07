@@ -1,4 +1,4 @@
-/* global pc */
+/* global pc, window */
 
 var LocalPlayerController = pc.createScript("localPlayerController");
 
@@ -122,9 +122,17 @@ LocalPlayerController.prototype.initialize = function () {
 
   this._onMouseMoveBound = this._onMouseMove.bind(this);
   this._onMouseDownBound = this._onMouseDown.bind(this);
+  this._onStateChangedBound = this._onStateChanged.bind(this);
+  this._onProfileReadyBound = this._onProfileReady.bind(this);
+  this._onStartGameBound = this._onStartGame.bind(this);
 
   var cfg = window.ArcadeConfig || {};
   this._playerName = this.playerName || (cfg.PLAYER_NAME_PREFIX || "Student");
+  if (!this.playerName && !(cfg.PLAYER_NAME_PREFIX || "")) {
+    console.log("[LocalPlayerController] No configured/player profile name yet; using Student fallback until onboarding finishes.");
+  }
+  this._gameState = this.app.arcadeGameState || window.ArcadeWorldGameState || "onboarding";
+  this._onProfileReady(this.app.arcadePlayerProfile || window.ArcadePlayerProfile || null);
 
   this._resolveNetworkClient();
   this._resolveCameraEntity();
@@ -137,6 +145,9 @@ LocalPlayerController.prototype.initialize = function () {
     this.app.mouse.on(pc.EVENT_MOUSEMOVE, this._onMouseMoveBound, this);
     this.app.mouse.on(pc.EVENT_MOUSEDOWN, this._onMouseDownBound, this);
   }
+  this.app.on("arcade:stateChanged", this._onStateChangedBound, this);
+  this.app.on("arcade:profileReady", this._onProfileReadyBound, this);
+  this.app.on("arcade:startGame", this._onStartGameBound, this);
 
   this.on("enable", this._onEnable, this);
   this.on("disable", this._onDisable, this);
@@ -144,6 +155,7 @@ LocalPlayerController.prototype.initialize = function () {
 
   console.log("[LocalPlayerController] Initialized");
   console.log("[LocalPlayerController] Camera mode: first-person");
+  console.log("[LocalPlayerController] Initial game state: " + this._gameState);
   this._onEnable();
 };
 
@@ -212,9 +224,68 @@ LocalPlayerController.prototype._onDestroy = function () {
     this.app.mouse.off(pc.EVENT_MOUSEMOVE, this._onMouseMoveBound, this);
     this.app.mouse.off(pc.EVENT_MOUSEDOWN, this._onMouseDownBound, this);
   }
+  this.app.off("arcade:stateChanged", this._onStateChangedBound, this);
+  this.app.off("arcade:profileReady", this._onProfileReadyBound, this);
+  this.app.off("arcade:startGame", this._onStartGameBound, this);
 };
 
-LocalPlayerController.prototype._onMouseDown = function () {
+LocalPlayerController.prototype._onStateChanged = function (state) {
+  this._gameState = state || "onboarding";
+  if (!this._isPlaying()) {
+    this._releasePointerLock();
+    this._stopMovementVelocity();
+  }
+  console.log("[LocalPlayerController] Game state -> " + this._gameState);
+};
+
+LocalPlayerController.prototype._onProfileReady = function (profile) {
+  if (!profile) {
+    return;
+  }
+
+  var name = typeof profile.name === "string" ? profile.name.trim().slice(0, 24) : "";
+  if (!name) {
+    console.log("[LocalPlayerController] Empty profile name received; using Student fallback.");
+    name = "Student";
+  }
+
+  this._playerName = name;
+  console.log("[LocalPlayerController] Player name saved for movement sync: " + this._playerName);
+};
+
+LocalPlayerController.prototype._onStartGame = function (profile) {
+  this._onProfileReady(profile);
+};
+
+LocalPlayerController.prototype._isPlaying = function () {
+  return this._gameState === "playing" || this.app.arcadeGameState === "playing" || window.ArcadeWorldGameState === "playing";
+};
+
+LocalPlayerController.prototype._releasePointerLock = function () {
+  if (typeof document !== "undefined" && document.pointerLockElement && document.exitPointerLock) {
+    document.exitPointerLock();
+    console.log("[LocalPlayerController] Pointer lock released outside gameplay");
+  }
+};
+
+LocalPlayerController.prototype._stopMovementVelocity = function () {
+  this._localMoveInput.set(0, 0, 0);
+  this._move.set(0, 0, 0);
+  if (!this.entity.rigidbody || this.entity.rigidbody.type !== pc.BODYTYPE_DYNAMIC) {
+    return;
+  }
+
+  this._currentVelocity.copy(this.entity.rigidbody.linearVelocity);
+  this._currentVelocity.x = 0;
+  this._currentVelocity.z = 0;
+  this.entity.rigidbody.linearVelocity = this._currentVelocity;
+};
+
+LocalPlayerController.prototype._onMouseDown = function (event) {
+  if (!this._isPlaying() || !this._isGameplayMouseEvent(event)) {
+    return;
+  }
+
   if (!this.enablePointerLock || !this.app.mouse || pc.Mouse.isPointerLocked()) {
     return;
   }
@@ -223,8 +294,16 @@ LocalPlayerController.prototype._onMouseDown = function () {
   console.log("[LocalPlayerController] Pointer lock requested");
 };
 
+LocalPlayerController.prototype._isGameplayMouseEvent = function (event) {
+  if (!event || !event.event || !this.app.graphicsDevice) {
+    return true;
+  }
+
+  return event.event.target === this.app.graphicsDevice.canvas;
+};
+
 LocalPlayerController.prototype._onMouseMove = function (event) {
-  if (!this.enabled) return;
+  if (!this.enabled || !this._isPlaying()) return;
   if (this.enablePointerLock && !pc.Mouse.isPointerLocked()) return;
 
   this.yawDegrees -= event.dx * this.mouseSensitivity;
@@ -237,6 +316,14 @@ LocalPlayerController.prototype.update = function (dt) {
   if (pointerLockedNow !== this._pointerLockLastState) {
     this._pointerLockLastState = pointerLockedNow;
     console.log("[LocalPlayerController] Pointer " + (pointerLockedNow ? "locked" : "unlocked"));
+  }
+
+  if (!this._isPlaying()) {
+    if (pointerLockedNow) {
+      this._releasePointerLock();
+    }
+    this._stopMovementVelocity();
+    return;
   }
 
   this._applyBodyYaw();
@@ -500,6 +587,15 @@ LocalPlayerController.prototype._sendMoveState = function () {
   if (!this.networkClient) return;
 
   var pos = this.entity.getPosition();
-  var name = this._playerName;
+  var profile = this.app.arcadePlayerProfile || window.ArcadePlayerProfile || null;
+  var name = profile && typeof profile.name === "string" && profile.name.trim() ? profile.name.trim().slice(0, 24) : this._playerName;
+  if (!name) {
+    console.log("[LocalPlayerController] Empty movement name; using Student fallback.");
+    name = "Student";
+  }
+  if (this._lastLoggedMoveName !== name) {
+    this._lastLoggedMoveName = name;
+    console.log("[LocalPlayerController] Sending movement name: " + name);
+  }
   this.networkClient.sendMove(pos, this.yawDegrees, name);
 };

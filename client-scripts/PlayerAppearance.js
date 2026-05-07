@@ -26,7 +26,7 @@ var ArcadePlayerAppearance = {
     var name = typeof safe.name === "string" ? safe.name.trim().slice(0, 24) : "";
 
     return {
-      name: name || "Player",
+      name: name || "Student",
       color: color,
       hatId: hatId
     };
