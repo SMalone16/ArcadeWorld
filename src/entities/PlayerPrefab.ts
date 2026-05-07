@@ -12,11 +12,16 @@ export interface PlayerPrefabOptions {
  */
 export function createPlayerPrefab(options: PlayerPrefabOptions = {}): Entity {
   const player = new Entity(options.name ?? 'player');
-  player.addComponent('render', { type: 'box' });
-  player.setLocalScale(3, 3, 3);
+  player.setLocalScale(1, 1, 1);
+
+  // Keep visuals on a child so playful squash/stretch never changes the gameplay transform.
+  const avatarVisual = new Entity('AvatarVisual');
+  avatarVisual.addComponent('render', { type: 'box' });
+  avatarVisual.setLocalScale(3, 3, 3);
+  player.addChild(avatarVisual);
 
   const head = new Entity('Head');
-  head.setLocalPosition(0, 1.2, 0);
+  head.setLocalPosition(0, 3.6, 0);
   player.addChild(head);
 
   const playerCamera = new Entity('PlayerCamera');
@@ -32,7 +37,7 @@ export function createPlayerPrefab(options: PlayerPrefabOptions = {}): Entity {
     material.diffuse = options.color;
     material.update();
 
-    const meshInstance = player.render?.meshInstances[0];
+    const meshInstance = avatarVisual.render?.meshInstances[0];
     if (meshInstance) {
       meshInstance.material = material;
     }

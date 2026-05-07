@@ -145,3 +145,46 @@ RemotePlayerTemplate
 
 - Replace placeholder avatars with student-customizable characters.
 - Add cabinet interactions, tickets, and shop logic.
+
+## 6) Manhunt / Hide-and-Seek vertical slice setup
+
+The Vite preview implementation now includes the first Manhunt loop in TypeScript. If you mirror it in a PlayCanvas Editor scene, keep the same separation of responsibilities:
+
+### Scripts to create or update
+
+- Create a central `ManhuntRoundManager` script/module equivalent to `src/events/ManhuntRoundManager.ts`.
+  - It should own only round rules and scoring, not rendering or low-level networking.
+  - Use these exact round states: `lobby`, `countdown`, `hidingPhase`, `seekingPhase`, `roundOver`.
+  - Track per-player fields: `playerId`, `team`, `isTagged`, `isSafe`, and `roundPoints`.
+  - Add temporary debug logs for team assignment, state changes, tags, safe-zone entries, and scoring.
+- Update the game/app orchestration script equivalent to `src/game/ArcadeGame.ts`.
+  - It should construct the manager, call `update(dt)`, refresh the HUD, and map a simple debug key/button to start/reset the round.
+- Update the network/player registry script equivalent to `src/network/LocalMockNetworkClient.ts`.
+  - The round manager needs a way to list current player ids and resolve `playerId -> Entity`.
+- Create a Manhunt HUD script equivalent to `src/ui/ManhuntHud.ts`.
+  - Show state, local team, timer, hiders safe/tagged counts, controls, and results.
+- Update the movement script equivalent to `src/entities/PlayerController.ts` / `client-scripts/LocalPlayerController.js`.
+  - Expose walk speed, sprint speed, jump force/height, gravity, and air control as script attributes.
+  - Keep squash/stretch visual-only by scaling a child visual/model entity, never the physics/collider root.
+
+### Entities to create or update
+
+- `ManhuntSafeZone` / `manhunt-safe-zone-trigger`
+  - Add a visible flat cylinder/disc or transparent marker at the base/safe-zone location.
+  - The current TypeScript slice checks distance against a configurable center/radius. In Editor projects you can either use a trigger collision component or call the same distance check from the manager.
+- Spawn transforms
+  - `LobbySpawn`: where all players return after results.
+  - `HiderStart`: where hiders begin their head start.
+  - `SeekerStart`: where the single seeker waits and is released.
+  - `SafeZone`: center of the scoring/base area.
+- Player prefab/local player
+  - Keep the root entity at scale `1,1,1` for gameplay/physics.
+  - Put body visuals under a child named `AvatarVisual` or `Visual`.
+  - Put camera/head under a separate child so squash/stretch does not move or resize the collider.
+
+### Current debug controls in the TypeScript preview
+
+- Press **M** to start Manhunt from the lobby, or reset after results.
+- Press **E** as the seeker to tag the closest active hider within tag range.
+- Press **Shift** to sprint.
+- Press **Space** to jump.

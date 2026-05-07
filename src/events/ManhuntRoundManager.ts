@@ -1,0 +1,294 @@
+import { KEY_E, Vec3 } from 'playcanvas';
+import { GAME_CONFIG } from '../game/config';
+import type { INetworkClient, SpawnTransform } from '../game/types';
+
+export type ManhuntRoundState = 'lobby' | 'countdown' | 'hidingPhase' | 'seekingPhase' | 'roundOver';
+export type ManhuntTeam = 'hider' | 'seeker';
+
+export interface ManhuntPlayerState {
+  playerId: string;
+  team: ManhuntTeam;
+  isTagged: boolean;
+  isSafe: boolean;
+  roundPoints: number;
+}
+
+export interface ManhuntRoundSnapshot {
+  state: ManhuntRoundState;
+  localPlayer?: ManhuntPlayerState;
+  timerSeconds: number;
+  hidersSafe: number;
+  hidersTagged: number;
+  hiderTotal: number;
+  results: ManhuntPlayerState[];
+  message: string;
+}
+
+interface ManhuntRoundManagerOptions {
+  app: import('playcanvas').AppBase;
+  networkClient: INetworkClient;
+  localClientId: string;
+  lobbySpawn: SpawnTransform;
+  hiderStart: SpawnTransform;
+  seekerStart: SpawnTransform;
+  safeZoneCenter: Vec3;
+  safeZoneRadius: number;
+}
+
+/**
+ * Central, client-side vertical slice for the first Manhunt event.
+ * It intentionally keeps round rules separate from scene construction and rendering.
+ */
+export class ManhuntRoundManager {
+  private readonly players = new Map<string, ManhuntPlayerState>();
+  private state: ManhuntRoundState = 'lobby';
+  private stateTimeRemaining = 0;
+  private roundElapsed = 0;
+  private results: ManhuntPlayerState[] = [];
+  private message = 'Press M to start Manhunt.';
+  private hasAwardedEndOfRoundPoints = false;
+
+  public constructor(private readonly options: ManhuntRoundManagerOptions) {
+  }
+
+  public getSnapshot(): ManhuntRoundSnapshot {
+    const localPlayer = this.players.get(this.options.localClientId);
+    const hiders = this.getHiders();
+    return {
+      state: this.state,
+      localPlayer: localPlayer ? { ...localPlayer } : undefined,
+      timerSeconds: Math.max(0, Math.ceil(this.stateTimeRemaining)),
+      hidersSafe: hiders.filter((player) => player.isSafe).length,
+      hidersTagged: hiders.filter((player) => player.isTagged).length,
+      hiderTotal: hiders.length,
+      results: this.results.map((player) => ({ ...player })),
+      message: this.message
+    };
+  }
+
+  public startRound(): void {
+    if (this.state !== 'lobby' && this.state !== 'roundOver') {
+      return;
+    }
+
+    const playerIds = this.options.networkClient.getPlayerIds();
+    if (playerIds.length < 2) {
+      this.message = 'Need at least 2 players to start Manhunt.';
+      console.warn('[Manhunt] start blocked: need at least 2 players');
+      return;
+    }
+
+    this.players.clear();
+    this.results = [];
+    this.hasAwardedEndOfRoundPoints = false;
+
+    const seekerId = playerIds[0];
+    playerIds.forEach((playerId) => {
+      const team: ManhuntTeam = playerId === seekerId ? 'seeker' : 'hider';
+      this.players.set(playerId, {
+        playerId,
+        team,
+        isTagged: false,
+        isSafe: false,
+        roundPoints: 0
+      });
+      console.log(`[Manhunt] team assignment: ${playerId} -> ${team}`);
+    });
+
+    this.teleportTeamsToStarts();
+    this.setState('countdown', GAME_CONFIG.manhunt.countdownSeconds, 'Manhunt starts soon! Hiders, get ready.');
+  }
+
+  public update(dt: number): void {
+    if (this.state === 'lobby') {
+      return;
+    }
+
+    this.stateTimeRemaining = Math.max(0, this.stateTimeRemaining - dt);
+    if (this.state === 'seekingPhase') {
+      this.roundElapsed += dt;
+      this.checkSafeZoneEntries();
+      this.checkTagInput();
+      this.endRoundIfComplete();
+    }
+
+    if (this.stateTimeRemaining <= 0) {
+      this.advanceStateFromTimer();
+    }
+  }
+
+  public resetToLobby(): void {
+    this.teleportAll(this.options.lobbySpawn);
+    this.players.clear();
+    this.results = [];
+    this.hasAwardedEndOfRoundPoints = false;
+    this.setState('lobby', 0, 'Press M to start Manhunt.');
+  }
+
+  private advanceStateFromTimer(): void {
+    if (this.state === 'countdown') {
+      this.setState('hidingPhase', GAME_CONFIG.manhunt.hidingPhaseSeconds, 'Hiders released! Seekers wait for the head start.');
+      this.releaseHidersOnly();
+      return;
+    }
+
+    if (this.state === 'hidingPhase') {
+      this.roundElapsed = 0;
+      this.setState('seekingPhase', GAME_CONFIG.manhunt.seekingPhaseSeconds, 'Seekers released! Tag hiders with E.');
+      this.releaseSeekers();
+      return;
+    }
+
+    if (this.state === 'seekingPhase') {
+      this.finishRound('Time is up!');
+    }
+  }
+
+  private setState(nextState: ManhuntRoundState, durationSeconds: number, message: string): void {
+    this.state = nextState;
+    this.stateTimeRemaining = durationSeconds;
+    this.message = message;
+    console.log(`[Manhunt] state changed -> ${nextState} (${durationSeconds}s): ${message}`);
+  }
+
+  private teleportTeamsToStarts(): void {
+    this.players.forEach((player) => {
+      const spawn = player.team === 'seeker' ? this.options.seekerStart : this.options.hiderStart;
+      this.teleportPlayer(player.playerId, spawn);
+    });
+  }
+
+  private releaseHidersOnly(): void {
+    this.getSeekers().forEach((seeker) => this.teleportPlayer(seeker.playerId, this.options.seekerStart));
+  }
+
+  private releaseSeekers(): void {
+    this.getSeekers().forEach((seeker) => this.teleportPlayer(seeker.playerId, this.options.seekerStart));
+  }
+
+  private teleportAll(spawn: SpawnTransform): void {
+    this.options.networkClient.getPlayerIds().forEach((playerId, index) => {
+      const offsetSpawn = {
+        position: spawn.position.clone().add(new Vec3(index * 1.5, 0, 0)),
+        rotationEuler: spawn.rotationEuler
+      };
+      this.teleportPlayer(playerId, offsetSpawn);
+    });
+  }
+
+  private teleportPlayer(playerId: string, spawn: SpawnTransform): void {
+    const entity = this.options.networkClient.getPlayerEntity(playerId);
+    if (!entity) {
+      return;
+    }
+
+    entity.setPosition(spawn.position);
+    entity.setEulerAngles(spawn.rotationEuler);
+  }
+
+  private checkSafeZoneEntries(): void {
+    this.getHiders().forEach((hider) => {
+      if (hider.isTagged || hider.isSafe) {
+        return;
+      }
+
+      const entity = this.options.networkClient.getPlayerEntity(hider.playerId);
+      if (!entity) {
+        return;
+      }
+
+      const distance = entity.getPosition().distance(this.options.safeZoneCenter);
+      if (distance > this.options.safeZoneRadius) {
+        return;
+      }
+
+      hider.isSafe = true;
+      hider.roundPoints += GAME_CONFIG.manhunt.points.hiderSafe;
+      console.log(`[Manhunt] safe zone entry: ${hider.playerId} +${GAME_CONFIG.manhunt.points.hiderSafe}`);
+      console.log(`[Manhunt] scoring: ${hider.playerId} now has ${hider.roundPoints}`);
+    });
+  }
+
+  private checkTagInput(): void {
+    const keyboard = this.options.app.keyboard;
+    if (!keyboard?.wasPressed(KEY_E)) {
+      return;
+    }
+
+    const localState = this.players.get(this.options.localClientId);
+    if (!localState || localState.team !== 'seeker') {
+      return;
+    }
+
+    const seekerEntity = this.options.networkClient.getPlayerEntity(localState.playerId);
+    if (!seekerEntity) {
+      return;
+    }
+
+    const seekerPosition = seekerEntity.getPosition();
+    const tagTarget = this.getHiders()
+      .filter((hider) => !hider.isTagged && !hider.isSafe)
+      .map((hider) => ({ hider, entity: this.options.networkClient.getPlayerEntity(hider.playerId) }))
+      .filter((entry): entry is { hider: ManhuntPlayerState; entity: import('playcanvas').Entity } => entry.entity !== null)
+      .map((entry) => ({ ...entry, distance: seekerPosition.distance(entry.entity.getPosition()) }))
+      .filter((entry) => entry.distance <= GAME_CONFIG.manhunt.tagDistance)
+      .sort((a, b) => a.distance - b.distance)[0];
+
+    if (!tagTarget) {
+      return;
+    }
+
+    tagTarget.hider.isTagged = true;
+    localState.roundPoints += GAME_CONFIG.manhunt.points.seekerTag;
+    console.log(`[Manhunt] tag: ${localState.playerId} tagged ${tagTarget.hider.playerId}`);
+    console.log(`[Manhunt] scoring: ${localState.playerId} +${GAME_CONFIG.manhunt.points.seekerTag} = ${localState.roundPoints}`);
+  }
+
+  private endRoundIfComplete(): void {
+    const activeHiders = this.getHiders().filter((hider) => !hider.isTagged && !hider.isSafe);
+    if (activeHiders.length === 0) {
+      this.finishRound('All hiders are safe or tagged!');
+    }
+  }
+
+  private finishRound(reason: string): void {
+    if (this.state === 'roundOver') {
+      return;
+    }
+
+    if (!this.hasAwardedEndOfRoundPoints) {
+      this.awardEndOfRoundPoints();
+    }
+
+    this.results = Array.from(this.players.values()).map((player) => ({ ...player }));
+    this.teleportAll(this.options.lobbySpawn);
+    this.setState('roundOver', GAME_CONFIG.manhunt.resultsSeconds, `${reason} Results shown below.`);
+  }
+
+  private awardEndOfRoundPoints(): void {
+    const failedHiderCount = this.getHiders().filter((hider) => !hider.isSafe).length;
+
+    this.getHiders().forEach((hider) => {
+      if (!hider.isTagged && !hider.isSafe) {
+        hider.roundPoints += GAME_CONFIG.manhunt.points.hiderSurvive;
+        console.log(`[Manhunt] scoring: ${hider.playerId} survived +${GAME_CONFIG.manhunt.points.hiderSurvive}`);
+      }
+    });
+
+    this.getSeekers().forEach((seeker) => {
+      const points = failedHiderCount * GAME_CONFIG.manhunt.points.seekerFailedHider;
+      seeker.roundPoints += points;
+      console.log(`[Manhunt] scoring: ${seeker.playerId} failed hiders ${failedHiderCount} +${points}`);
+    });
+
+    this.hasAwardedEndOfRoundPoints = true;
+  }
+
+  private getHiders(): ManhuntPlayerState[] {
+    return Array.from(this.players.values()).filter((player) => player.team === 'hider');
+  }
+
+  private getSeekers(): ManhuntPlayerState[] {
+    return Array.from(this.players.values()).filter((player) => player.team === 'seeker');
+  }
+}

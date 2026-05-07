@@ -1,10 +1,11 @@
-import { Application, Keyboard, KEY_E, Mouse } from 'playcanvas';
+import { Application, Keyboard, KEY_E, KEY_M, Mouse } from 'playcanvas';
 import { LobbyScene } from '../scenes/LobbyScene';
 import { PlayerController } from '../entities/PlayerController';
 import { Hud } from '../ui/Hud';
 import { GAME_CONFIG } from './config';
 import { createNetworkClient } from '../network/NetworkClient';
 import type { Interactable } from '../entities/Interactable';
+import { ManhuntRoundManager } from '../events/ManhuntRoundManager';
 
 export class ArcadeGame {
   private static readonly TRANSFORM_SEND_HZ = 15;
@@ -16,6 +17,7 @@ export class ArcadeGame {
   private playerController: PlayerController | null = null;
   private readonly hud: Hud;
   private readonly networkClient = createNetworkClient();
+  private readonly manhuntRoundManager: ManhuntRoundManager;
   private readonly localClientId = 'local-client-1';
   private nearbyInteractable: Interactable | null = null;
   private sendAccumulator = 0;
@@ -36,6 +38,16 @@ export class ArcadeGame {
     this.lobbyScene.build();
 
     this.hud = new Hud(this.uiContainer);
+    this.manhuntRoundManager = new ManhuntRoundManager({
+      app: this.app,
+      networkClient: this.networkClient,
+      localClientId: this.localClientId,
+      lobbySpawn: this.lobbyScene.getManhuntLobbySpawn(),
+      hiderStart: this.lobbyScene.getManhuntHiderStart(),
+      seekerStart: this.lobbyScene.getManhuntSeekerStart(),
+      safeZoneCenter: this.lobbyScene.safeZoneCenter,
+      safeZoneRadius: this.lobbyScene.safeZoneRadius
+    });
   }
 
   public async start(): Promise<void> {
@@ -60,9 +72,20 @@ export class ArcadeGame {
       this.playerController?.update(dt);
       this.sendAccumulator += dt;
       this.syncLocalPlayerStateAtFixedTick();
+      this.manhuntRoundManager.update(dt);
+      this.hud.manhuntHud.update(this.manhuntRoundManager.getSnapshot());
       this.updateInteractionState();
 
       const keyboard = this.app.keyboard;
+      if (keyboard?.wasPressed(KEY_M)) {
+        const snapshot = this.manhuntRoundManager.getSnapshot();
+        if (snapshot.state === 'roundOver') {
+          this.manhuntRoundManager.resetToLobby();
+        } else {
+          this.manhuntRoundManager.startRound();
+        }
+      }
+
       if (this.nearbyInteractable && keyboard?.wasPressed(KEY_E)) {
         this.nearbyInteractable.interact();
       }

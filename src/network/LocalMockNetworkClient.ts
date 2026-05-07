@@ -106,6 +106,10 @@ export class LocalMockNetworkClient implements INetworkClient {
     return this.clientPlayerMap.get(clientId) ?? null;
   }
 
+  public getPlayerIds(): string[] {
+    return Array.from(this.clientPlayerMap.keys());
+  }
+
   public removeClient(clientId: string): void {
     this.despawnPlayerForClient(clientId);
   }

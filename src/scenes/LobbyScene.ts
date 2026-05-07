@@ -13,6 +13,8 @@ export class LobbyScene {
   public readonly root = new Entity('lobby-root');
   public readonly playersRoot = new Entity('players-root');
   public readonly interactables: Interactable[] = [];
+  public readonly safeZoneCenter = new Vec3(GAME_CONFIG.manhunt.spawns.safeZone.x, GAME_CONFIG.manhunt.spawns.safeZone.y, GAME_CONFIG.manhunt.spawns.safeZone.z);
+  public readonly safeZoneRadius = GAME_CONFIG.manhunt.safeZoneRadius;
   private readonly spawnPointEntities: Entity[] = [];
 
   public constructor(private readonly context: LobbySceneContext) {
@@ -23,6 +25,7 @@ export class LobbyScene {
     this.addLighting();
     this.addRoom();
     this.addCabinets();
+    this.addManhuntSafeZone();
     this.addSpawnPoints();
 
     this.root.addChild(this.playersRoot);
@@ -33,6 +36,18 @@ export class LobbyScene {
       position: spawnPoint.getPosition().clone(),
       rotationEuler: spawnPoint.getEulerAngles().clone()
     }));
+  }
+
+  public getManhuntLobbySpawn(): SpawnTransform {
+    return this.createSpawnTransform(GAME_CONFIG.manhunt.spawns.lobby, new Vec3(0, 180, 0));
+  }
+
+  public getManhuntHiderStart(): SpawnTransform {
+    return this.createSpawnTransform(GAME_CONFIG.manhunt.spawns.hiderStart, new Vec3(0, 90, 0));
+  }
+
+  public getManhuntSeekerStart(): SpawnTransform {
+    return this.createSpawnTransform(GAME_CONFIG.manhunt.spawns.seekerStart, new Vec3(0, -90, 0));
   }
 
   private addLighting(): void {
@@ -70,6 +85,29 @@ export class LobbyScene {
     });
   }
 
+
+  private addManhuntSafeZone(): void {
+    const safeZone = new Entity('manhunt-safe-zone-trigger');
+    safeZone.tags.add('ManhuntSafeZone');
+    safeZone.addComponent('render', { type: 'cylinder' });
+    safeZone.setPosition(this.safeZoneCenter);
+    safeZone.setLocalScale(this.safeZoneRadius * 2, 0.1, this.safeZoneRadius * 2);
+
+    const material = new StandardMaterial();
+    material.diffuse = new Color(0.2, 0.9, 0.65);
+    material.emissive = new Color(0.05, 0.25, 0.18);
+    material.opacity = 0.55;
+    material.blendType = 2;
+    material.update();
+
+    const meshInstance = safeZone.render?.meshInstances[0];
+    if (meshInstance) {
+      meshInstance.material = material;
+    }
+
+    this.root.addChild(safeZone);
+  }
+
   private addSpawnPoints(): void {
     const spawnDefinitions = [
       { position: new Vec3(0, 1.6, 4), rotationEuler: new Vec3(0, 180, 0) },
@@ -87,6 +125,14 @@ export class LobbyScene {
       this.spawnPointEntities.push(spawnPoint);
       this.root.addChild(spawnPoint);
     });
+  }
+
+
+  private createSpawnTransform(position: { x: number; y: number; z: number }, rotationEuler: Vec3): SpawnTransform {
+    return {
+      position: new Vec3(position.x, position.y, position.z),
+      rotationEuler
+    };
   }
 
   private createBox(name: string, position: Vec3, scale: Vec3, color: Color): Entity {
