@@ -32,4 +32,5 @@ export interface INetworkClient {
   sendInput(input: Record<string, unknown>): void;
   onSnapshot(handler: (snapshot: unknown) => void): void;
   getPlayerEntity(clientId: string): Entity | null;
+  getPlayerIds(): string[];
 }
