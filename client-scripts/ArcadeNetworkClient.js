@@ -1,4 +1,4 @@
-/* global Colyseus, pc */
+/* global Colyseus, pc, window */
 
 var ArcadeNetworkClient = pc.createScript("arcadeNetworkClient");
 
@@ -82,6 +82,7 @@ ArcadeNetworkClient.prototype.initialize = function () {
   }
 
   if (this.autoConnect) {
+    this._setGameState("playing");
     this._connect();
   } else {
     console.log("[ArcadeNetworkClient] Auto connect disabled; waiting for pregame profile.");
@@ -147,7 +148,19 @@ ArcadeNetworkClient.prototype._collectSpawnPoints = function () {
 
 ArcadeNetworkClient.prototype.connectWithProfile = async function (profile) {
   this.selectedProfile = this._sanitizeProfile(profile);
+  window.ArcadePlayerProfile = this.selectedProfile;
+  this.app.arcadePlayerProfile = this.selectedProfile;
+  console.log("[ArcadeNetworkClient] connectWithProfile using", this.selectedProfile);
   return this._connect();
+};
+
+ArcadeNetworkClient.prototype._setGameState = function (state) {
+  this.app.arcadeGameState = state;
+  window.ArcadeWorldGameState = state;
+  this.app.fire("arcade:stateChanged", state);
+  if (state === "playing") {
+    this.app.fire("arcade:startGame", this.selectedProfile || this.app.arcadePlayerProfile || window.ArcadePlayerProfile || null);
+  }
 };
 
 ArcadeNetworkClient.prototype._connect = async function () {
@@ -241,7 +254,12 @@ ArcadeNetworkClient.prototype._spawnLocalPlayer = function () {
   console.log("[ArcadeNetworkClient] Local player spawned");
 
   var rotY = local.getEulerAngles().y;
-  this.sendMove(spawnPosition, rotY, null);
+  var spawnName = this.selectedProfile && this.selectedProfile.name ? this.selectedProfile.name : "Student";
+  if (!this.selectedProfile || !this.selectedProfile.name) {
+    console.log("[ArcadeNetworkClient] Missing selected profile at spawn; using Student fallback for initial move.");
+  }
+  console.log("[ArcadeNetworkClient] Sending spawn name: " + spawnName);
+  this.sendMove(spawnPosition, rotY, spawnName);
 };
 
 ArcadeNetworkClient.prototype._selectSpawnPoint = function () {
@@ -340,6 +358,7 @@ ArcadeNetworkClient.prototype._sendProfile = function () {
     return;
   }
 
+  console.log("[ArcadeNetworkClient] Sending profile to server", this.selectedProfile);
   this.room.send("profile", this.selectedProfile);
 };
 
@@ -350,16 +369,25 @@ ArcadeNetworkClient.prototype._sanitizeProfile = function (profile) {
   var hatId = safe.hatId === "Top Hat" || safe.hatId === "Western" || safe.hatId === "No Hat" ? safe.hatId : "No Hat";
 
   return {
-    name: name || "Player",
+    name: name || this._fallbackName(),
     color: color,
     hatId: hatId
   };
+};
+
+ArcadeNetworkClient.prototype._fallbackName = function () {
+  console.log("[ArcadeNetworkClient] Empty profile name; using Student fallback.");
+  return "Student";
 };
 
 ArcadeNetworkClient.prototype._applyLocalProfile = function () {
   var local = this._resolvedLocalPlayerEntity;
   if (!local || !this.selectedProfile) {
     return;
+  }
+
+  if (local.script && local.script.localPlayerController && local.script.localPlayerController._onProfileReady) {
+    local.script.localPlayerController._onProfileReady(this.selectedProfile);
   }
 
   if (local.script && local.script.playerAppearance && local.script.playerAppearance.applyProfile) {

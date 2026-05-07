@@ -1,4 +1,4 @@
-/* global pc, localStorage */
+/* global pc, localStorage, window */
 
 var PregameOverlay = pc.createScript("pregameOverlay");
 
@@ -12,6 +12,8 @@ PregameOverlay.prototype.initialize = function () {
   this._hatIds = ["No Hat", "Top Hat", "Western"];
   this._colorChoices = ["#44aaff", "#ffcc66", "#88dd77", "#ff88bb", "#aa99ff"];
   this._profile = this._loadProfile();
+  this._setGameState("onboarding");
+  this._releasePointerLock();
   this._root = this._createRootElement();
   this._render();
   this.on("destroy", this._onDestroy, this);
@@ -19,7 +21,7 @@ PregameOverlay.prototype.initialize = function () {
 
 PregameOverlay.prototype._loadProfile = function () {
   var fallback = {
-    name: "Player",
+    name: "Student",
     color: "#44aaff",
     hatId: "No Hat"
   };
@@ -50,6 +52,13 @@ PregameOverlay.prototype._createRootElement = function () {
   root.style.background = "linear-gradient(135deg, rgba(7, 18, 32, 0.94), rgba(32, 22, 60, 0.92))";
   root.style.color = "#f6fbff";
   root.style.font = "16px/1.4 Arial, sans-serif";
+  root.style.cursor = "auto";
+
+  this._stopOverlayEventBound = this._stopOverlayEvent.bind(this);
+  var blockedEvents = ["pointerdown", "pointerup", "mousedown", "mouseup", "mousemove", "click", "keydown", "keyup"];
+  for (var i = 0; i < blockedEvents.length; i++) {
+    root.addEventListener(blockedEvents[i], this._stopOverlayEventBound);
+  }
 
   document.body.appendChild(root);
   return root;
@@ -183,7 +192,12 @@ PregameOverlay.prototype._createColorButton = function (color) {
   return button;
 };
 
-PregameOverlay.prototype._onPlay = async function () {
+PregameOverlay.prototype._onPlay = async function (event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
   var networkClient = this._getNetworkClient();
   if (!networkClient || !networkClient.connectWithProfile) {
     this._showError("ArcadeNetworkClient is missing. Assign networkClientEntity to NetworkManager.");
@@ -191,16 +205,25 @@ PregameOverlay.prototype._onPlay = async function () {
   }
 
   var profile = this._sanitizeProfile({
-    name: this._nameInput.value,
+    name: this._nameInput ? this._nameInput.value : "",
     color: this._colorInput.value,
     hatId: this._hatSelect.value
   });
 
+  console.log("[PregameOverlay] Play clicked with profile", profile);
   this._saveProfile(profile);
   this._profile = profile;
+
+  window.ArcadePlayerProfile = profile;
+  this.app.arcadePlayerProfile = profile;
+  this.app.fire("arcade:profileReady", profile);
+  this._hide();
+  this._setGameState("playing");
+  this.app.fire("arcade:startGame", profile);
+  this._requestPointerLockOnce();
+
   this._showError("Connecting...");
   await networkClient.connectWithProfile(profile);
-  this._hide();
 };
 
 PregameOverlay.prototype._getNetworkClient = function () {
@@ -218,10 +241,42 @@ PregameOverlay.prototype._sanitizeProfile = function (profile) {
   var hatId = this._hatIds.indexOf(safe.hatId) !== -1 ? safe.hatId : "No Hat";
 
   return {
-    name: name || "Player",
+    name: name || this._fallbackName(),
     color: color,
     hatId: hatId
   };
+};
+
+PregameOverlay.prototype._fallbackName = function () {
+  console.log("[PregameOverlay] Empty display name; using Student fallback.");
+  return "Student";
+};
+
+PregameOverlay.prototype._setGameState = function (state) {
+  this.app.arcadeGameState = state;
+  window.ArcadeWorldGameState = state;
+  this.app.fire("arcade:stateChanged", state);
+  console.log("[PregameOverlay] Game state -> " + state);
+};
+
+PregameOverlay.prototype._releasePointerLock = function () {
+  if (typeof document !== "undefined" && document.pointerLockElement && document.exitPointerLock) {
+    document.exitPointerLock();
+    console.log("[PregameOverlay] Pointer lock released for onboarding");
+  }
+};
+
+PregameOverlay.prototype._requestPointerLockOnce = function () {
+  if (!this.app.mouse || this.app.arcadeGameState !== "playing" || pc.Mouse.isPointerLocked()) {
+    return;
+  }
+
+  this.app.mouse.enablePointerLock();
+  console.log("[PregameOverlay] Pointer lock requested from Play click");
+};
+
+PregameOverlay.prototype._stopOverlayEvent = function (event) {
+  event.stopPropagation();
 };
 
 PregameOverlay.prototype._showError = function (message) {
@@ -237,7 +292,16 @@ PregameOverlay.prototype._hide = function () {
 };
 
 PregameOverlay.prototype._onDestroy = function () {
-  if (this._root && this._root.parentNode) {
-    this._root.parentNode.removeChild(this._root);
+  if (this._root) {
+    if (this._stopOverlayEventBound) {
+      var blockedEvents = ["pointerdown", "pointerup", "mousedown", "mouseup", "mousemove", "click", "keydown", "keyup"];
+      for (var i = 0; i < blockedEvents.length; i++) {
+        this._root.removeEventListener(blockedEvents[i], this._stopOverlayEventBound);
+      }
+    }
+
+    if (this._root.parentNode) {
+      this._root.parentNode.removeChild(this._root);
+    }
   }
 };
