@@ -5,9 +5,7 @@ Arcade World is a **live online virtual arcade for students**.
 This repository now includes:
 - A **Colyseus multiplayer server** (`/server`) for the shared lobby.
 - **PlayCanvas-ready client scripts** (`/client-scripts`) you upload into your existing PlayCanvas Editor project.
-- Teacher-friendly setup/testing docs for **GitHub Codespaces**.
-
-> Today's goal: get multiple players moving in the same PlayCanvas map **today**.
+- Setup/testing docs for **GitHub Codespaces**.
 
 ---
 
