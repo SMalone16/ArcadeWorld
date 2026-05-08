@@ -12,6 +12,7 @@ Upload/copy these files from repo folder `client-scripts/`:
 - `PlayerAppearance.js`
 - `PregameOverlay.js`
 - `NetworkDebugOverlay.js`
+- `ManhuntManager.js`
 
 ## 2) Add Colyseus client library in PlayCanvas
 
@@ -148,30 +149,26 @@ RemotePlayerTemplate
 
 ## 6) Manhunt / Hide-and-Seek vertical slice setup
 
-The Vite preview implementation now includes the first Manhunt loop in TypeScript. If you mirror it in a PlayCanvas Editor scene, keep the same separation of responsibilities:
+The Vite preview implementation includes the first Manhunt loop in TypeScript, and `client-scripts/ManhuntManager.js` mirrors that vertical slice for PlayCanvas Editor scenes while keeping the same separation of responsibilities:
 
-### Scripts to create or update
+### Scripts to attach or update
 
-- Create a central `ManhuntRoundManager` script/module equivalent to `src/events/ManhuntRoundManager.ts`.
-  - It should own only round rules and scoring, not rendering or low-level networking.
-  - Use these exact round states: `lobby`, `countdown`, `hidingPhase`, `seekingPhase`, `roundOver`.
-  - Track per-player fields: `playerId`, `team`, `isTagged`, `isSafe`, and `roundPoints`.
-  - Add temporary debug logs for team assignment, state changes, tags, safe-zone entries, and scoring.
-- Update the game/app orchestration script equivalent to `src/game/ArcadeGame.ts`.
-  - It should construct the manager, call `update(dt)`, refresh the HUD, and map a simple debug key/button to start/reset the round.
-- Update the network/player registry script equivalent to `src/network/LocalMockNetworkClient.ts`.
-  - The round manager needs a way to list current player ids and resolve `playerId -> Entity`.
-- Create a Manhunt HUD script equivalent to `src/ui/ManhuntHud.ts`.
-  - Show state, local team, timer, hiders safe/tagged counts, controls, and results.
-- Update the movement script equivalent to `src/entities/PlayerController.ts` / `client-scripts/LocalPlayerController.js`.
-  - Expose walk speed, sprint speed, jump force/height, gravity, and air control as script attributes.
-  - Keep squash/stretch visual-only by scaling a child visual/model entity, never the physics/collider root.
+- Attach `ManhuntManager.js` to a `GameModeManager` entity or to the existing `NetworkManager` entity.
+  - It owns the client-side round rules, scoring, debug controls, and temporary DOM HUD while keeping server networking in `ArcadeNetworkClient.js` / `RemotePlayerManager.js`.
+  - Assign `networkManagerEntity`, `remotePlayerManagerEntity`, `localPlayerEntity`, `lobbySpawn`, `hiderStart`, `seekerStart`, and `safeZoneEntity` in the Editor.
+  - Tune `safeZoneRadius`, `countdownSeconds`, `hidingPhaseSeconds`, `seekingPhaseSeconds`, `resultsSeconds`, and `tagDistance` from script attributes.
+  - It uses the exact round states `lobby`, `countdown`, `hidingPhase`, `seekingPhase`, and `roundOver`, and tracks each player's `playerId`, `team`, `isTagged`, `isSafe`, and `roundPoints`.
+  - It logs start-blocked cases, team assignment, state changes, safe-zone entries, tags, and scoring.
+- `ArcadeNetworkClient.js` and `RemotePlayerManager.js` now expose helper methods for Manhunt/player registry code: `getLocalPlayerId()`, `getLocalPlayerEntity()`, `getRemotePlayerEntities()`, and `getAllPlayerEntities()`.
+  - The local player id is `ArcadeNetworkClient.sessionId`.
+  - Remote player entities come from `RemotePlayerManager.remoteEntities`.
+- Keep `LocalPlayerController.js` on the local player for movement; the Manhunt slice does not require movement-script changes or server changes yet.
 
 ### Entities to create or update
 
-- `ManhuntSafeZone` / `manhunt-safe-zone-trigger`
+- `ManhuntSafeZone`
   - Add a visible flat cylinder/disc or transparent marker at the base/safe-zone location.
-  - The current TypeScript slice checks distance against a configurable center/radius. In Editor projects you can either use a trigger collision component or call the same distance check from the manager.
+  - `ManhuntManager.js` checks player distance from `safeZoneEntity.getPosition()` against `safeZoneRadius`; no trigger/collider is required for this vertical slice.
 - Spawn transforms
   - `LobbySpawn`: where all players return after results.
   - `HiderStart`: where hiders begin their head start.
@@ -182,7 +179,7 @@ The Vite preview implementation now includes the first Manhunt loop in TypeScrip
   - Put body visuals under a child named `AvatarVisual` or `Visual`.
   - Put camera/head under a separate child so squash/stretch does not move or resize the collider.
 
-### Current debug controls in the TypeScript preview
+### Current debug controls
 
 - Press **M** to start Manhunt from the lobby, or reset after results.
 - Press **E** as the seeker to tag the closest active hider within tag range.

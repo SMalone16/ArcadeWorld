@@ -264,6 +264,45 @@ RemotePlayerManager.prototype._colorFromHex = function (hex) {
   return new pc.Color(((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255);
 };
 
+
+RemotePlayerManager.prototype.getRemotePlayerEntities = function () {
+  var source = this.remoteEntities || {};
+  var remotes = {};
+  for (var sessionId in source) {
+    if (Object.prototype.hasOwnProperty.call(source, sessionId)) {
+      remotes[sessionId] = source[sessionId];
+    }
+  }
+  return remotes;
+};
+
+RemotePlayerManager.prototype.getLocalPlayerEntity = function () {
+  if (!this.networkClient || !this.networkClient.getLocalPlayerEntity) {
+    return null;
+  }
+
+  return this.networkClient.getLocalPlayerEntity();
+};
+
+RemotePlayerManager.prototype.getAllPlayerEntities = function () {
+  var players = {};
+  if (this.networkClient && this.networkClient.getLocalPlayerId) {
+    var localId = this.networkClient.getLocalPlayerId();
+    if (localId) {
+      players[localId] = this.getLocalPlayerEntity();
+    }
+  }
+
+  var remotes = this.getRemotePlayerEntities();
+  for (var sessionId in remotes) {
+    if (Object.prototype.hasOwnProperty.call(remotes, sessionId)) {
+      players[sessionId] = remotes[sessionId];
+    }
+  }
+
+  return players;
+};
+
 RemotePlayerManager.prototype.getVisibleRemoteCount = function () {
   var count = 0;
   for (var sessionId in this.remoteEntities) {

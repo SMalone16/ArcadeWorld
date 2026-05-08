@@ -413,6 +413,49 @@ ArcadeNetworkClient.prototype.sendMove = function (position, rotY, name) {
   });
 };
 
+
+ArcadeNetworkClient.prototype._getRemotePlayerManager = function () {
+  if (!this.remotePlayerManagerEntity || !this.remotePlayerManagerEntity.script) {
+    return null;
+  }
+
+  return this.remotePlayerManagerEntity.script.remotePlayerManager || null;
+};
+
+ArcadeNetworkClient.prototype.getLocalPlayerId = function () {
+  return this.sessionId || "";
+};
+
+ArcadeNetworkClient.prototype.getLocalPlayerEntity = function () {
+  return this._resolvedLocalPlayerEntity || this.localPlayerEntity || null;
+};
+
+ArcadeNetworkClient.prototype.getRemotePlayerEntities = function () {
+  var remoteManager = this._getRemotePlayerManager();
+  if (!remoteManager || !remoteManager.getRemotePlayerEntities) {
+    return {};
+  }
+
+  return remoteManager.getRemotePlayerEntities();
+};
+
+ArcadeNetworkClient.prototype.getAllPlayerEntities = function () {
+  var players = {};
+  var localId = this.getLocalPlayerId();
+  if (localId) {
+    players[localId] = this.getLocalPlayerEntity();
+  }
+
+  var remotes = this.getRemotePlayerEntities();
+  for (var sessionId in remotes) {
+    if (Object.prototype.hasOwnProperty.call(remotes, sessionId)) {
+      players[sessionId] = remotes[sessionId];
+    }
+  }
+
+  return players;
+};
+
 ArcadeNetworkClient.prototype.getRemotePlayerCount = function () {
   var count = 0;
   for (var sessionId in this._remoteSessionIds) {
