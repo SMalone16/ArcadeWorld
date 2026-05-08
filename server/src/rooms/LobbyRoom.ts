@@ -17,6 +17,15 @@ type ProfileMessage = {
   hatId?: string;
 };
 
+type ManhuntMessage = {
+  type?: string;
+  roundId?: string;
+  playerIds?: string[];
+  seekerId?: string;
+  starterId?: string;
+  hiderId?: string;
+};
+
 const DEFAULT_COLOR = "#44aaff";
 const DEFAULT_HAT_ID = "No Hat";
 const SAFE_HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
@@ -66,6 +75,19 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
       player.name = sanitizeName(message?.name, player.name);
       player.color = sanitizeColor(message?.color, player.color);
       player.hatId = sanitizeHatId(message?.hatId, player.hatId);
+    });
+
+    this.onMessage("manhunt", (client, message: ManhuntMessage) => {
+      if (!message || typeof message.type !== "string") {
+        return;
+      }
+
+      // Relay lightweight playtest events so one student can start Manhunt and
+      // tag/safe feedback reaches every browser without a full authoritative mode.
+      this.broadcast("manhunt", {
+        ...message,
+        senderId: client.sessionId,
+      });
     });
 
     this.onMessage("move", (client, message: MovementMessage) => {
