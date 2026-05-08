@@ -11,6 +11,7 @@ These scripts are designed to be copied/uploaded into your **existing PlayCanvas
 - `PlayerAppearance.js` - shared helper/script for body color and hat selection
 - `PregameOverlay.js` - DOM pre-game profile picker for name, body color, and hat
 - `NetworkDebugOverlay.js` - temporary DOM overlay for multiplayer playtests
+- `ManhuntManager.js` - client-side PlayCanvas Manhunt vertical slice with round state, tagging, safe-zone scoring, and a DOM HUD
 
 ## Important
 
@@ -19,6 +20,7 @@ These scripts are designed to be copied/uploaded into your **existing PlayCanvas
 3. Attach scripts exactly as documented in `docs/PLAYCANVAS_SETUP.md`.
 4. During multi-screen tests, add `NetworkDebugOverlay.js` to the same NetworkManager entity so each client reports its connection/session/remote-visibility state on screen.
 5. For the pre-game flow, attach `PregameOverlay.js` to a `PregameUI` entity, set `PregameOverlay.networkClientEntity` to `NetworkManager`, and set `ArcadeNetworkClient.autoConnect=false`.
+6. For Manhunt tests, attach `ManhuntManager.js` to `GameModeManager` or `NetworkManager`, then assign its network manager, remote player manager, local player, spawn marker, and safe-zone marker attributes. Press `M` in the lobby to start/reset and press `E` as the seeker to tag nearby active hiders.
 
 ## Pre-game customization setup
 
@@ -46,4 +48,4 @@ RemotePlayerTemplate
 - Tickets system
 - Shop economy
 - Arcade machine interactions that launch mini-games
-- Hide & Seek mode
+- Server-authoritative Manhunt/Hide & Seek synchronization
