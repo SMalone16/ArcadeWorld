@@ -28,4 +28,19 @@ export class PlayerState extends Schema {
 
   @type("number")
   rotY = 0;
+
+  @type("string")
+  manhuntTeam = "none";
+
+  @type("string")
+  manhuntStatus = "none";
+
+  @type("number")
+  manhuntPoints = 0;
+
+  @type("number")
+  totalPoints = 0;
+
+  @type("boolean")
+  isInManhuntRound = false;
 }

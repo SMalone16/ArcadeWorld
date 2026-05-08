@@ -213,7 +213,8 @@ RemotePlayerManager.prototype._updateNameplates = function () {
 
     var visible = this._screenPosition.z > 0 &&
       this._screenPosition.x >= 0 && this._screenPosition.x <= width &&
-      this._screenPosition.y >= 0 && this._screenPosition.y <= height;
+      this._screenPosition.y >= 0 && this._screenPosition.y <= height &&
+      this.shouldShowNameplate(sessionId);
 
     plate.style.display = visible ? "block" : "none";
     if (visible) {
@@ -221,6 +222,21 @@ RemotePlayerManager.prototype._updateNameplates = function () {
       plate.style.top = this._screenPosition.y + "px";
     }
   }
+};
+
+
+RemotePlayerManager.prototype.shouldShowNameplate = function (remoteSessionId) {
+  if (!this.networkClient || !this.networkClient.isManhuntActive || !this.networkClient.isManhuntActive()) {
+    return true;
+  }
+
+  var localTeam = this.networkClient.getLocalManhuntTeam ? this.networkClient.getLocalManhuntTeam() : "none";
+  var remoteTeam = this.networkClient.getPlayerManhuntTeam ? this.networkClient.getPlayerManhuntTeam(remoteSessionId) : "none";
+  if (!localTeam || !remoteTeam || localTeam === "none" || remoteTeam === "none") {
+    return false;
+  }
+
+  return localTeam === remoteTeam;
 };
 
 RemotePlayerManager.prototype._findActiveCameraEntity = function () {
