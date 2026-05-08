@@ -154,15 +154,16 @@ The Vite preview implementation includes the first Manhunt loop in TypeScript, a
 ### Scripts to attach or update
 
 - Attach `ManhuntManager.js` to a `GameModeManager` entity or to the existing `NetworkManager` entity.
-  - It owns the client-side round rules, scoring, debug controls, and temporary DOM HUD while keeping server networking in `ArcadeNetworkClient.js` / `RemotePlayerManager.js`.
+  - It owns the client-side round rules, scoring, debug controls, a large center overlay, and a right-side status HUD while keeping room-message transport in `ArcadeNetworkClient.js` / `RemotePlayerManager.js`.
   - Assign `networkManagerEntity`, `remotePlayerManagerEntity`, `localPlayerEntity`, `lobbySpawn`, `hiderStart`, `seekerStart`, and `safeZoneEntity` in the Editor.
   - Tune `safeZoneRadius`, `countdownSeconds`, `hidingPhaseSeconds`, `seekingPhaseSeconds`, `resultsSeconds`, and `tagDistance` from script attributes.
   - It uses the exact round states `lobby`, `countdown`, `hidingPhase`, `seekingPhase`, and `roundOver`, and tracks each player's `playerId`, `team`, `isTagged`, `isSafe`, and `roundPoints`.
-  - It logs start-blocked cases, team assignment, state changes, safe-zone entries, tags, and scoring.
-- `ArcadeNetworkClient.js` and `RemotePlayerManager.js` now expose helper methods for Manhunt/player registry code: `getLocalPlayerId()`, `getLocalPlayerEntity()`, `getRemotePlayerEntities()`, and `getAllPlayerEntities()`.
+  - It logs players seen, local player names, remote counts, start-blocked cases, team assignment, state changes, safe-zone entries, tags, and scoring.
+  - Pressing **M** now only starts a round while the local player is inside `safeZoneRadius` of `safeZoneEntity`. If `safeZoneEntity` is not assigned, the script warns and allows starts for debugging only.
+- `ArcadeNetworkClient.js` and `RemotePlayerManager.js` now expose helper methods for Manhunt/player registry code: `getLocalPlayerId()`, `getLocalPlayerEntity()`, `getRemotePlayerEntities()`, `getAllPlayerEntities()`, `getLocalPlayerProfile()`, `sendManhuntEvent()`, and `onManhuntEvent()`.
   - The local player id is `ArcadeNetworkClient.sessionId`.
   - Remote player entities come from `RemotePlayerManager.remoteEntities`.
-- Keep `LocalPlayerController.js` on the local player for movement; the Manhunt slice does not require movement-script changes or server changes yet.
+- Keep `LocalPlayerController.js` on the local player for movement. The server only relays lightweight `manhunt` room messages for start/tag/safe events; round rules still live in the PlayCanvas client slice for this playtest.
 
 ### Entities to create or update
 
@@ -181,7 +182,7 @@ The Vite preview implementation includes the first Manhunt loop in TypeScript, a
 
 ### Current debug controls
 
-- Press **M** to start Manhunt from the lobby, or reset after results.
-- Press **E** as the seeker to tag the closest active hider within tag range.
+- Gather at Home Base / the safe zone, then press **M** to start Manhunt from free roam. Pressing **M** outside Home Base shows a clear "Go to Home Base" message.
+- Press **E** as the seeker during the seeking phase to tag the closest active hider within tag range.
 - Press **Shift** to sprint.
 - Press **Space** to jump.
