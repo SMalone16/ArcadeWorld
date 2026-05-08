@@ -147,42 +147,52 @@ RemotePlayerTemplate
 - Replace placeholder avatars with student-customizable characters.
 - Add cabinet interactions, tickets, and shop logic.
 
-## 6) Manhunt / Hide-and-Seek vertical slice setup
+## 6) Manhunt / Hide-and-Seek multiplayer setup
 
-The Vite preview implementation includes the first Manhunt loop in TypeScript, and `client-scripts/ManhuntManager.js` mirrors that vertical slice for PlayCanvas Editor scenes while keeping the same separation of responsibilities:
+Manhunt is now a server-authoritative multiplayer game mode. The Colyseus room owns the round phase, countdown timer, team assignments, safe/tagged status, points, and server-side teleports. PlayCanvas clients only request actions and render the synchronized state they receive from the room schema.
 
 ### Scripts to attach or update
 
 - Attach `ManhuntManager.js` to a `GameModeManager` entity or to the existing `NetworkManager` entity.
-  - It owns the client-side round rules, scoring, debug controls, a large center overlay, and a right-side status HUD while keeping room-message transport in `ArcadeNetworkClient.js` / `RemotePlayerManager.js`.
-  - Assign `networkManagerEntity`, `remotePlayerManagerEntity`, `localPlayerEntity`, `lobbySpawn`, `hiderStart`, `seekerStart`, and `safeZoneEntity` in the Editor.
-  - Tune `safeZoneRadius`, `countdownSeconds`, `hidingPhaseSeconds`, `seekingPhaseSeconds`, `resultsSeconds`, and `tagDistance` from script attributes.
-  - It uses the exact round states `lobby`, `countdown`, `hidingPhase`, `seekingPhase`, and `roundOver`, and tracks each player's `playerId`, `team`, `isTagged`, `isSafe`, and `roundPoints`.
-  - It logs players seen, local player names, remote counts, start-blocked cases, team assignment, state changes, safe-zone entries, tags, and scoring.
-  - Pressing **M** now only starts a round while the local player is inside `safeZoneRadius` of `safeZoneEntity`. If `safeZoneEntity` is not assigned, the script warns and allows starts for debugging only.
-- `ArcadeNetworkClient.js` and `RemotePlayerManager.js` now expose helper methods for Manhunt/player registry code: `getLocalPlayerId()`, `getLocalPlayerEntity()`, `getRemotePlayerEntities()`, `getAllPlayerEntities()`, `getLocalPlayerProfile()`, `sendManhuntEvent()`, and `onManhuntEvent()`.
-  - The local player id is `ArcadeNetworkClient.sessionId`.
-  - Remote player entities come from `RemotePlayerManager.remoteEntities`.
-- Keep `LocalPlayerController.js` on the local player for movement. The server only relays lightweight `manhunt` room messages for start/tag/safe events; round rules still live in the PlayCanvas client slice for this playtest.
+  - Assign `networkManagerEntity`, `remotePlayerManagerEntity`, `localPlayerEntity`, and `safeZoneEntity` in the Editor.
+  - The client-side safe-zone check is only immediate feedback for pressing **M** outside Home Base; the server still enforces the real start restriction from server-tracked player positions.
+  - The right-side Manhunt HUD is student-facing and shows phase, team badge, timer, objective, hider safe/tagged counts, points, and the latest server message.
+  - The center overlay shows team reveal, synchronized countdown, phase-change instructions, and readable round-over results.
+- `ArcadeNetworkClient.js` listens to the server `manhunt` schema plus Manhunt feedback messages.
+  - It exposes `getManhuntState()`, `getLocalManhuntTeam()`, `getLocalManhuntStatus()`, `getPlayerManhuntTeam(sessionId)`, `getPlayerDisplayName(sessionId)`, `isManhuntActive()`, `sendManhuntStartRequest()`, and `sendManhuntTagRequest()` for UI and nameplate code.
+  - It applies large authoritative server position corrections to the local player so server teleports to hider/seeker/lobby starts are visible in every browser.
+- `RemotePlayerManager.js` keeps DOM nameplates but applies Manhunt visibility rules.
+  - In lobby/free roam and round-over results, all nametags may be shown.
+  - During `countdown`, `hidingPhase`, and `seekingPhase`, remote nametags are shown only for same-team players and are hidden for opponents.
+- Keep `LocalPlayerController.js` on the local player for movement. It continues sending movement packets, but the server can override positions for Manhunt teleports and seeker lock during the hider head start.
+
+### Server expectations
+
+- Run the Colyseus server from `/server` so clients join the shared `arcade_lobby` room.
+- The room schema contains `state.manhunt` with phases `lobby`, `countdown`, `hidingPhase`, `seekingPhase`, and `roundOver`.
+- Each `PlayerState` includes `manhuntTeam`, `manhuntStatus`, `manhuntPoints`, `totalPoints`, and `isInManhuntRound`.
+- Clients send:
+  - `manhunt:startRequest` when the player presses **M** at Home Base.
+  - `manhunt:tagRequest` when a seeker presses **E** during the seeking phase.
+- The server validates player count, Home Base distance, seeker/hider roles, tag distance, safe-zone entry, scoring, and round reset.
 
 ### Entities to create or update
 
 - `ManhuntSafeZone`
-  - Add a visible flat cylinder/disc or transparent marker at the base/safe-zone location.
-  - `ManhuntManager.js` checks player distance from `safeZoneEntity.getPosition()` against `safeZoneRadius`; no trigger/collider is required for this vertical slice.
+  - Add a visible flat cylinder/disc or transparent marker at the Home Base location.
+  - Match this visible marker to the server safe-zone coordinates in `server/src/rooms/LobbyRoom.ts` (`safeZoneX/Y/Z` and `safeZoneRadius`) until those values are promoted to a scene-config message.
 - Spawn transforms
-  - `LobbySpawn`: where all players return after results.
-  - `HiderStart`: where hiders begin their head start.
-  - `SeekerStart`: where the single seeker waits and is released.
-  - `SafeZone`: center of the scoring/base area.
+  - Hider, seeker, and lobby spawn positions are currently server-owned defaults in `LobbyRoom.ts`.
+  - Keep matching PlayCanvas editor markers named clearly (for example `HiderStart`, `SeekerStart`, `LobbySpawn`) so students can understand where server teleports will place players.
 - Player prefab/local player
   - Keep the root entity at scale `1,1,1` for gameplay/physics.
   - Put body visuals under a child named `AvatarVisual` or `Visual`.
   - Put camera/head under a separate child so squash/stretch does not move or resize the collider.
 
-### Current debug controls
+### Current controls
 
-- Gather at Home Base / the safe zone, then press **M** to start Manhunt from free roam. Pressing **M** outside Home Base shows a clear "Go to Home Base" message.
-- Press **E** as the seeker during the seeking phase to tag the closest active hider within tag range.
+- Gather at Home Base / the safe zone, then press **M** to request a server-authoritative Manhunt round.
+- Pressing **M** outside Home Base shows "Go to Home Base to start Manhunt" locally, and the server also rejects invalid starts.
+- Press **E** as the seeker during the seeking phase to ask the server to tag the nearest active hider within range.
 - Press **Shift** to sprint.
 - Press **Space** to jump.

@@ -56,7 +56,8 @@ ArcadeNetworkClient.prototype.initialize = function () {
     remoteAdded: [],
     remoteUpdated: [],
     remoteRemoved: [],
-    manhuntEvent: []
+    manhuntEvent: [],
+    manhuntStateChanged: []
   };
 
   this.sessionId = null;
@@ -67,6 +68,9 @@ ArcadeNetworkClient.prototype.initialize = function () {
   this._remoteSessionIds = {};
   this._hasBoundPlayers = false;
   this._hasBoundManhuntMessages = false;
+  this._hasBoundManhuntState = false;
+  this._knownPlayers = {};
+  this._lastAppliedServerPosition = null;
   this._isOfflineMode = false;
   this._isConnecting = false;
   this.selectedProfile = null;
@@ -314,6 +318,7 @@ ArcadeNetworkClient.prototype._bindStateListeners = function () {
     return false;
   }
 
+  this._bindManhuntStateCallbacks($);
   this._hasBoundPlayers = true;
 
   stateCallbacks.players.onAdd(function (player, sessionId) {
@@ -321,25 +326,95 @@ ArcadeNetworkClient.prototype._bindStateListeners = function () {
     if (sessionId !== self.sessionId) {
       self._remoteSessionIds[sessionId] = true;
     }
+    self._knownPlayers[sessionId] = player;
     self._emit("remoteAdded", self._toPlayerPayload(player, sessionId));
 
     var playerCallbacks = $(player);
-    playerCallbacks.listen("x", function () { self._emit("remoteUpdated", self._toPlayerPayload(player, sessionId)); });
-    playerCallbacks.listen("y", function () { self._emit("remoteUpdated", self._toPlayerPayload(player, sessionId)); });
-    playerCallbacks.listen("z", function () { self._emit("remoteUpdated", self._toPlayerPayload(player, sessionId)); });
-    playerCallbacks.listen("rotY", function () { self._emit("remoteUpdated", self._toPlayerPayload(player, sessionId)); });
-    playerCallbacks.listen("name", function () { self._emit("remoteUpdated", self._toPlayerPayload(player, sessionId)); });
-    playerCallbacks.listen("color", function () { self._emit("remoteUpdated", self._toPlayerPayload(player, sessionId)); });
-    playerCallbacks.listen("hatId", function () { self._emit("remoteUpdated", self._toPlayerPayload(player, sessionId)); });
+    var emitPlayerUpdate = function () {
+      var payload = self._toPlayerPayload(player, sessionId);
+      if (sessionId === self.sessionId) {
+        self._maybeApplyLocalServerPosition(payload);
+      }
+      self._emit("remoteUpdated", payload);
+      self._emit("manhuntStateChanged", self.getManhuntState());
+    };
+    playerCallbacks.listen("x", emitPlayerUpdate);
+    playerCallbacks.listen("y", emitPlayerUpdate);
+    playerCallbacks.listen("z", emitPlayerUpdate);
+    playerCallbacks.listen("rotY", emitPlayerUpdate);
+    playerCallbacks.listen("name", emitPlayerUpdate);
+    playerCallbacks.listen("color", emitPlayerUpdate);
+    playerCallbacks.listen("hatId", emitPlayerUpdate);
+    playerCallbacks.listen("manhuntTeam", emitPlayerUpdate);
+    playerCallbacks.listen("manhuntStatus", emitPlayerUpdate);
+    playerCallbacks.listen("manhuntPoints", emitPlayerUpdate);
+    playerCallbacks.listen("totalPoints", emitPlayerUpdate);
+    playerCallbacks.listen("isInManhuntRound", emitPlayerUpdate);
   });
 
   stateCallbacks.players.onRemove(function (_player, sessionId) {
     console.log("[ArcadeNetworkClient] Remote player removed", sessionId);
     delete self._remoteSessionIds[sessionId];
+    delete self._knownPlayers[sessionId];
     self._emit("remoteRemoved", { sessionId: sessionId });
+    self._emit("manhuntStateChanged", self.getManhuntState());
   });
 
   return true;
+};
+
+
+ArcadeNetworkClient.prototype._bindManhuntStateCallbacks = function ($) {
+  if (this._hasBoundManhuntState || !this.room || !this.room.state || !this.room.state.manhunt) {
+    return;
+  }
+
+  this._hasBoundManhuntState = true;
+  var self = this;
+  var manhuntCallbacks = $(this.room.state.manhunt);
+  var emitManhuntState = function () {
+    self._emit("manhuntStateChanged", self.getManhuntState());
+  };
+  var fields = [
+    "phase", "timerSeconds", "roundNumber", "message", "startedBy",
+    "safeZoneX", "safeZoneY", "safeZoneZ", "safeZoneRadius",
+    "hiderStartX", "hiderStartY", "hiderStartZ",
+    "seekerStartX", "seekerStartY", "seekerStartZ",
+    "lobbySpawnX", "lobbySpawnY", "lobbySpawnZ"
+  ];
+  for (var i = 0; i < fields.length; i++) {
+    manhuntCallbacks.listen(fields[i], emitManhuntState);
+  }
+  emitManhuntState();
+};
+
+ArcadeNetworkClient.prototype._maybeApplyLocalServerPosition = function (payload) {
+  var local = this.getLocalPlayerEntity();
+  if (!local || !payload) {
+    return;
+  }
+
+  if (!payload.isInManhuntRound && !this.isManhuntActive()) {
+    return;
+  }
+
+  var current = local.getPosition();
+  var dx = current.x - payload.x;
+  var dy = current.y - payload.y;
+  var dz = current.z - payload.z;
+  var distanceSq = dx * dx + dy * dy + dz * dz;
+  if (distanceSq < 1) {
+    return;
+  }
+
+  var position = new pc.Vec3(payload.x, payload.y, payload.z);
+  if (local.rigidbody && local.rigidbody.teleport) {
+    local.rigidbody.teleport(position);
+    local.rigidbody.linearVelocity = pc.Vec3.ZERO;
+  } else {
+    local.setPosition(position);
+  }
+  console.log("[ArcadeNetworkClient] Applied authoritative server teleport", payload);
 };
 
 ArcadeNetworkClient.prototype._toPlayerPayload = function (player, sessionId) {
@@ -352,7 +427,12 @@ ArcadeNetworkClient.prototype._toPlayerPayload = function (player, sessionId) {
     rotY: typeof player.rotY === "number" ? player.rotY : (player.yaw || 0),
     name: player.name,
     color: player.color,
-    hatId: player.hatId
+    hatId: player.hatId,
+    manhuntTeam: player.manhuntTeam || "none",
+    manhuntStatus: player.manhuntStatus || "none",
+    manhuntPoints: player.manhuntPoints || 0,
+    totalPoints: player.totalPoints || 0,
+    isInManhuntRound: player.isInManhuntRound === true
   };
 };
 
@@ -426,14 +506,39 @@ ArcadeNetworkClient.prototype._bindManhuntMessages = function () {
   this.room.onMessage("manhunt", function (payload) {
     this._emit("manhuntEvent", payload || {});
   }.bind(this));
+
+  this.room.onMessage("manhunt:feedback", function (payload) {
+    this._emit("manhuntEvent", { type: "feedback", message: payload && payload.message ? payload.message : "Manhunt request rejected." });
+  }.bind(this));
 };
 
 ArcadeNetworkClient.prototype.sendManhuntEvent = function (payload) {
+  if (!payload || payload.type === "startRound") {
+    return this.sendManhuntStartRequest();
+  }
+
+  if (payload.type === "tagHider") {
+    return this.sendManhuntTagRequest();
+  }
+
+  return false;
+};
+
+ArcadeNetworkClient.prototype.sendManhuntStartRequest = function () {
   if (!this.room || !this.room.send) {
     return false;
   }
 
-  this.room.send("manhunt", payload || {});
+  this.room.send("manhunt:startRequest", {});
+  return true;
+};
+
+ArcadeNetworkClient.prototype.sendManhuntTagRequest = function () {
+  if (!this.room || !this.room.send) {
+    return false;
+  }
+
+  this.room.send("manhunt:tagRequest", {});
   return true;
 };
 
@@ -495,6 +600,76 @@ ArcadeNetworkClient.prototype.getRemotePlayerCount = function () {
     }
   }
   return count;
+};
+
+
+ArcadeNetworkClient.prototype.getManhuntState = function () {
+  var manhunt = this.room && this.room.state ? this.room.state.manhunt : null;
+  if (!manhunt) {
+    return { phase: "lobby", timerSeconds: 0, roundNumber: 0, message: "", players: {} };
+  }
+
+  var players = {};
+  var source = this._knownPlayers || {};
+  for (var sessionId in source) {
+    if (Object.prototype.hasOwnProperty.call(source, sessionId)) {
+      players[sessionId] = this._toPlayerPayload(source[sessionId], sessionId);
+    }
+  }
+
+  return {
+    phase: manhunt.phase || "lobby",
+    timerSeconds: manhunt.timerSeconds || 0,
+    roundNumber: manhunt.roundNumber || 0,
+    message: manhunt.message || "",
+    startedBy: manhunt.startedBy || "",
+    safeZoneX: manhunt.safeZoneX || 0,
+    safeZoneY: manhunt.safeZoneY || 0,
+    safeZoneZ: manhunt.safeZoneZ || 0,
+    safeZoneRadius: manhunt.safeZoneRadius || 0,
+    players: players
+  };
+};
+
+ArcadeNetworkClient.prototype.getLocalManhuntTeam = function () {
+  return this.getPlayerManhuntTeam(this.getLocalPlayerId());
+};
+
+ArcadeNetworkClient.prototype.getLocalManhuntStatus = function () {
+  var player = this._knownPlayers[this.getLocalPlayerId()];
+  return player ? (player.manhuntStatus || "none") : "none";
+};
+
+ArcadeNetworkClient.prototype.getPlayerManhuntTeam = function (sessionId) {
+  var player = this._knownPlayers[sessionId];
+  return player ? (player.manhuntTeam || "none") : "none";
+};
+
+ArcadeNetworkClient.prototype.getPlayerManhuntStatus = function (sessionId) {
+  var player = this._knownPlayers[sessionId];
+  return player ? (player.manhuntStatus || "none") : "none";
+};
+
+ArcadeNetworkClient.prototype.getPlayerManhuntPoints = function (sessionId) {
+  var player = this._knownPlayers[sessionId];
+  return player ? (player.manhuntPoints || 0) : 0;
+};
+
+ArcadeNetworkClient.prototype.getPlayerDisplayName = function (sessionId) {
+  var player = this._knownPlayers[sessionId];
+  if (player && player.name) {
+    return player.name;
+  }
+  return sessionId ? "Player " + String(sessionId).slice(0, 4) : "Student";
+};
+
+ArcadeNetworkClient.prototype.isManhuntActive = function () {
+  var phase = this.getManhuntState().phase;
+  return phase === "countdown" || phase === "hidingPhase" || phase === "seekingPhase";
+};
+
+ArcadeNetworkClient.prototype.onManhuntStateChanged = function (callback) {
+  this.onEvent("manhuntStateChanged", callback);
 };
 
 ArcadeNetworkClient.prototype.getDebugSnapshot = function () {

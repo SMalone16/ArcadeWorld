@@ -1,111 +1,34 @@
-/* global pc, document, window */
+/* global pc, document */
 
 var ManhuntManager = pc.createScript("manhuntManager");
 
-ManhuntManager.attributes.add("networkManagerEntity", {
-  type: "entity",
-  title: "Network Manager Entity"
-});
-
-ManhuntManager.attributes.add("remotePlayerManagerEntity", {
-  type: "entity",
-  title: "Remote Player Manager Entity"
-});
-
-ManhuntManager.attributes.add("localPlayerEntity", {
-  type: "entity",
-  title: "Local Player Entity"
-});
-
-ManhuntManager.attributes.add("lobbySpawn", {
-  type: "entity",
-  title: "Lobby Spawn"
-});
-
-ManhuntManager.attributes.add("hiderStart", {
-  type: "entity",
-  title: "Hider Start"
-});
-
-ManhuntManager.attributes.add("seekerStart", {
-  type: "entity",
-  title: "Seeker Start"
-});
-
-ManhuntManager.attributes.add("safeZoneEntity", {
-  type: "entity",
-  title: "Safe Zone Entity"
-});
-
-ManhuntManager.attributes.add("safeZoneRadius", {
-  type: "number",
-  default: 2.6,
-  min: 0,
-  title: "Safe Zone Radius"
-});
-
-ManhuntManager.attributes.add("countdownSeconds", {
-  type: "number",
-  default: 5,
-  min: 0,
-  title: "Countdown Seconds"
-});
-
-ManhuntManager.attributes.add("hidingPhaseSeconds", {
-  type: "number",
-  default: 10,
-  min: 0,
-  title: "Hiding Phase Seconds"
-});
-
-ManhuntManager.attributes.add("seekingPhaseSeconds", {
-  type: "number",
-  default: 90,
-  min: 0,
-  title: "Seeking Phase Seconds"
-});
-
-ManhuntManager.attributes.add("resultsSeconds", {
-  type: "number",
-  default: 10,
-  min: 0,
-  title: "Results Seconds"
-});
-
-ManhuntManager.attributes.add("tagDistance", {
-  type: "number",
-  default: 2.2,
-  min: 0,
-  title: "Tag Distance"
-});
+ManhuntManager.attributes.add("networkManagerEntity", { type: "entity", title: "Network Manager Entity" });
+ManhuntManager.attributes.add("remotePlayerManagerEntity", { type: "entity", title: "Remote Player Manager Entity" });
+ManhuntManager.attributes.add("localPlayerEntity", { type: "entity", title: "Local Player Entity" });
+ManhuntManager.attributes.add("safeZoneEntity", { type: "entity", title: "Safe Zone Entity" });
+ManhuntManager.attributes.add("safeZoneRadius", { type: "number", default: 2.6, min: 0, title: "Safe Zone Radius" });
 
 ManhuntManager.prototype.initialize = function () {
-  this.players = {};
-  this.state = "lobby";
-  this.stateTimeRemaining = 0;
-  this.roundElapsed = 0;
-  this.results = [];
-  this.message = "Go to Home Base and press M to start Manhunt.";
-  this.hasAwardedEndOfRoundPoints = false;
-  this.roundId = "";
-  this._feedbackText = "";
-  this._feedbackTimeRemaining = 0;
-
   this.networkClient = this._resolveScript(this.networkManagerEntity, "arcadeNetworkClient");
   this.remotePlayerManager = this._resolveScript(this.remotePlayerManagerEntity, "remotePlayerManager");
-  this._scratchPosition = new pc.Vec3();
+  this.state = "lobby";
+  this.message = "Go to Home Base and press M to start Manhunt.";
+  this._feedbackText = "";
+  this._feedbackTimeRemaining = 0;
+  this._lastOverlayKey = "";
+  this._lastLoggedPhase = "";
   this._hudRoot = this._createSideHud();
   this._overlayRoot = this._createCenterOverlay();
 
   this._validateSetup();
   this._bindNetworkEvents();
-  this._logPlayerDebug("initialize");
   this._renderUi();
   this.on("destroy", this._onDestroy, this);
 };
 
 ManhuntManager.prototype.update = function (dt) {
   this._checkStartInput();
+  this._checkTagInput();
 
   if (this._feedbackTimeRemaining > 0) {
     this._feedbackTimeRemaining = Math.max(0, this._feedbackTimeRemaining - dt);
@@ -114,327 +37,90 @@ ManhuntManager.prototype.update = function (dt) {
     }
   }
 
-  if (this.state === "lobby") {
-    this._renderUi();
-    return;
-  }
-
-  this.stateTimeRemaining = Math.max(0, this.stateTimeRemaining - dt);
-
-  if (this.state === "hidingPhase") {
-    this._holdLocalSeekerAtStart();
-  }
-
-  if (this.state === "seekingPhase") {
-    this.roundElapsed += dt;
-    this._checkLocalSafeZoneEntry();
-    this._checkTagInput();
-    this._endRoundIfComplete();
-  }
-
-  if (this.stateTimeRemaining <= 0) {
-    this._advanceStateFromTimer();
-  }
-
   this._renderUi();
 };
 
 ManhuntManager.prototype.startRound = function () {
-  if (!this._canStartFromCurrentState()) {
+  var snapshot = this.getSnapshot();
+  if (snapshot.state !== "lobby" && snapshot.state !== "roundOver") {
     return;
   }
 
-  if (!this._isLocalPlayerInSafeZone()) {
-    this.message = "Go to Home Base to start Manhunt.";
+  if (!this._isLocalPlayerInSafeZone(snapshot)) {
     this._showFeedback("Go to Home Base to start Manhunt.", 2.5);
-    console.warn("[Manhunt] start blocked: local player is outside Home Base safe zone");
-    this._renderUi();
+    console.warn("[Manhunt] start blocked locally: player is outside Home Base safe zone");
     return;
   }
 
-  var playerIds = this._getPlayerIds();
-  if (playerIds.length < 2) {
-    this.message = "Need at least 2 players to start Manhunt.";
-    this._showFeedback("Need at least 2 players to start Manhunt.", 2.5);
-    console.warn("[Manhunt] start blocked: need at least 2 players");
-    this._renderUi();
+  if (!this.networkClient || !this.networkClient.sendManhuntStartRequest) {
+    this._showFeedback("Connect to the server to start Manhunt.", 2.5);
+    console.warn("[Manhunt] start blocked: authoritative server unavailable");
     return;
   }
 
-  playerIds.sort();
-  var roundId = (this._getLocalPlayerId() || "local") + "-" + Date.now();
-  var payload = {
-    type: "startRound",
-    roundId: roundId,
-    playerIds: playerIds,
-    seekerId: playerIds[0],
-    starterId: this._getLocalPlayerId()
-  };
-
-  if (this._sendManhuntEvent(payload)) {
-    console.log("[Manhunt] start requested by " + this._getPlayerDisplayName(payload.starterId) + " for " + playerIds.length + " players");
-    return;
-  }
-
-  this._startRoundFromPayload(payload);
-};
-
-ManhuntManager.prototype.resetToLobby = function () {
-  this._teleportAll(this.lobbySpawn);
-  this.players = {};
-  this.results = [];
-  this.hasAwardedEndOfRoundPoints = false;
-  this.roundId = "";
-  this._setState("lobby", 0, "Go to Home Base and press M to start Manhunt.");
+  console.log("[Manhunt] sending authoritative start request");
+  this.networkClient.sendManhuntStartRequest();
 };
 
 ManhuntManager.prototype.getSnapshot = function () {
-  var localPlayer = this.players[this._getLocalPlayerId()];
-  var hiders = this._getHiders();
+  var serverState = this.networkClient && this.networkClient.getManhuntState ? this.networkClient.getManhuntState() : null;
+  var players = serverState && serverState.players ? serverState.players : {};
+  var localId = this._getLocalPlayerId();
+  var local = players[localId] || null;
+  var hiders = this._getPlayersByTeam(players, "hider");
+
   return {
-    state: this.state,
-    localPlayer: localPlayer ? this._copyPlayerState(localPlayer) : null,
-    timerSeconds: Math.max(0, Math.ceil(this.stateTimeRemaining)),
-    hidersSafe: this._countHidersByFlag("isSafe"),
-    hidersTagged: this._countHidersByFlag("isTagged"),
+    state: serverState ? serverState.phase : "lobby",
+    timerSeconds: Math.max(0, Math.ceil(serverState ? serverState.timerSeconds : 0)),
+    message: serverState && serverState.message ? serverState.message : this.message,
+    localPlayer: local,
+    players: players,
+    hidersSafe: this._countHidersByStatus(hiders, "safe"),
+    hidersTagged: this._countHidersByStatus(hiders, "tagged"),
     hiderTotal: hiders.length,
-    results: this.results.map(this._copyPlayerState),
-    message: this.message
+    safeZoneX: serverState ? serverState.safeZoneX : 0,
+    safeZoneY: serverState ? serverState.safeZoneY : 0,
+    safeZoneZ: serverState ? serverState.safeZoneZ : 0,
+    safeZoneRadius: serverState ? serverState.safeZoneRadius : this.safeZoneRadius,
+    results: this._playersToResults(players)
   };
 };
 
 ManhuntManager.prototype._bindNetworkEvents = function () {
-  if (!this.networkClient || !this.networkClient.onManhuntEvent) {
-    console.warn("[Manhunt] ArcadeNetworkClient manhunt events unavailable; only this browser will run the round.");
+  if (!this.networkClient) {
+    console.warn("[Manhunt] ArcadeNetworkClient missing; Manhunt requires the server for multiplayer rounds.");
     return;
   }
 
-  this.networkClient.onManhuntEvent(this._onManhuntEvent.bind(this));
-};
-
-ManhuntManager.prototype._onManhuntEvent = function (payload) {
-  if (!payload || !payload.type) {
-    return;
+  if (this.networkClient.onManhuntStateChanged) {
+    this.networkClient.onManhuntStateChanged(this._onServerManhuntStateChanged.bind(this));
   }
 
-  if (payload.type === "startRound") {
-    this._startRoundFromPayload(payload);
-    return;
-  }
-
-  if (payload.roundId && this.roundId && payload.roundId !== this.roundId) {
-    console.warn("[Manhunt] ignored stale event for round " + payload.roundId + " while in " + this.roundId);
-    return;
-  }
-
-  if (payload.type === "hiderSafe") {
-    this._markHiderSafe(payload.hiderId, true);
-    return;
-  }
-
-  if (payload.type === "tagHider") {
-    this._markHiderTagged(payload.hiderId, payload.seekerId, true);
+  if (this.networkClient.onManhuntEvent) {
+    this.networkClient.onManhuntEvent(this._onManhuntFeedback.bind(this));
   }
 };
 
-ManhuntManager.prototype._sendManhuntEvent = function (payload) {
-  if (!this.networkClient || !this.networkClient.sendManhuntEvent) {
-    return false;
+ManhuntManager.prototype._onServerManhuntStateChanged = function (state) {
+  var phase = state && state.phase ? state.phase : "lobby";
+  if (phase !== this._lastLoggedPhase) {
+    this._lastLoggedPhase = phase;
+    console.log("[Manhunt] authoritative phase -> " + phase, state);
   }
-
-  return this.networkClient.sendManhuntEvent(payload);
+  this.state = phase;
+  this.message = state && state.message ? state.message : this.message;
+  this._renderUi();
 };
 
-ManhuntManager.prototype._canStartFromCurrentState = function () {
-  if (this.state !== "lobby") {
-    console.warn("[Manhunt] start blocked: round already running in state " + this.state);
-    return false;
+ManhuntManager.prototype._onManhuntFeedback = function (payload) {
+  if (payload && payload.type === "feedback" && payload.message) {
+    this._showFeedback(payload.message, 2.5);
   }
-
-  return true;
-};
-
-ManhuntManager.prototype._startRoundFromPayload = function (payload) {
-  if (!payload || !payload.roundId || !payload.playerIds || payload.playerIds.length < 2) {
-    console.warn("[Manhunt] ignored invalid start payload", payload);
-    return;
-  }
-
-  if (this.roundId === payload.roundId) {
-    return;
-  }
-
-  if (this.state !== "lobby") {
-    console.warn("[Manhunt] ignored start event while in state " + this.state);
-    return;
-  }
-
-  this.players = {};
-  this.results = [];
-  this.hasAwardedEndOfRoundPoints = false;
-  this.roundElapsed = 0;
-  this.roundId = payload.roundId;
-
-  var playerIds = payload.playerIds.slice(0).sort();
-  var seekerId = payload.seekerId || playerIds[0];
-  console.log("[Manhunt] players seen: " + playerIds.map(this._getPlayerDisplayName.bind(this)).join(", "));
-  console.log("[Manhunt] local player: " + this._getLocalPlayerDisplayName() + " (" + this._shortId(this._getLocalPlayerId()) + ")");
-  console.log("[Manhunt] remote count: " + this._getRemotePlayerCount());
-
-  for (var i = 0; i < playerIds.length; i++) {
-    var playerId = playerIds[i];
-    var team = playerId === seekerId ? "seeker" : "hider";
-    this.players[playerId] = {
-      playerId: playerId,
-      team: team,
-      isTagged: false,
-      isSafe: false,
-      roundPoints: 0
-    };
-    console.log("[Manhunt] team assignment: " + this._getPlayerDisplayName(playerId) + " -> " + team);
-  }
-
-  this._teleportTeamsToStarts();
-  this._setState("countdown", this.countdownSeconds, "Round starts in " + Math.ceil(this.countdownSeconds) + ".");
 };
 
 ManhuntManager.prototype._checkStartInput = function () {
-  if (!this.app.keyboard || !this.app.keyboard.wasPressed(pc.KEY_M)) {
-    return;
-  }
-
-  if (this.state === "lobby") {
+  if (this.app.keyboard && this.app.keyboard.wasPressed(pc.KEY_M)) {
     this.startRound();
-  }
-};
-
-ManhuntManager.prototype._advanceStateFromTimer = function () {
-  if (this.state === "countdown") {
-    this.setStateForHidingPhase();
-    return;
-  }
-
-  if (this.state === "hidingPhase") {
-    this.roundElapsed = 0;
-    this._setState("seekingPhase", this.seekingPhaseSeconds, "Seekers released! Tag hiders with E.");
-    this._releaseSeekers();
-    return;
-  }
-
-  if (this.state === "seekingPhase") {
-    this._finishRound("Time is up!");
-    return;
-  }
-
-  if (this.state === "roundOver") {
-    this.resetToLobby();
-  }
-};
-
-ManhuntManager.prototype.setStateForHidingPhase = function () {
-  this._setState("hidingPhase", this.hidingPhaseSeconds, "Hiders released! Seekers wait for the head start.");
-  this._releaseHidersOnly();
-};
-
-ManhuntManager.prototype._setState = function (nextState, durationSeconds, message) {
-  this.state = nextState;
-  this.stateTimeRemaining = durationSeconds;
-  this.message = message;
-  console.log("[Manhunt] state changed -> " + nextState + " (" + durationSeconds + "s): " + message);
-};
-
-ManhuntManager.prototype._teleportTeamsToStarts = function () {
-  var ids = Object.keys(this.players);
-  for (var i = 0; i < ids.length; i++) {
-    var player = this.players[ids[i]];
-    var spawn = player.team === "seeker" ? this.seekerStart : this.hiderStart;
-    this._teleportPlayer(player.playerId, spawn);
-  }
-};
-
-ManhuntManager.prototype._releaseHidersOnly = function () {
-  var seekers = this._getSeekers();
-  for (var i = 0; i < seekers.length; i++) {
-    this._teleportPlayer(seekers[i].playerId, this.seekerStart);
-  }
-};
-
-ManhuntManager.prototype._holdLocalSeekerAtStart = function () {
-  var localState = this.players[this._getLocalPlayerId()];
-  if (localState && localState.team === "seeker") {
-    this._teleportPlayer(localState.playerId, this.seekerStart);
-  }
-};
-
-ManhuntManager.prototype._releaseSeekers = function () {
-  var seekers = this._getSeekers();
-  for (var i = 0; i < seekers.length; i++) {
-    this._teleportPlayer(seekers[i].playerId, this.seekerStart);
-  }
-};
-
-ManhuntManager.prototype._teleportAll = function (spawnEntity) {
-  var ids = this._getPlayerIds();
-  for (var i = 0; i < ids.length; i++) {
-    this._teleportPlayer(ids[i], spawnEntity, i * 1.5);
-  }
-};
-
-ManhuntManager.prototype._teleportPlayer = function (playerId, spawnEntity, xOffset) {
-  var entity = this._getPlayerEntity(playerId);
-  if (!entity || !spawnEntity) {
-    return;
-  }
-
-  var position = spawnEntity.getPosition().clone();
-  position.x += xOffset || 0;
-  entity.setPosition(position);
-  entity.setEulerAngles(spawnEntity.getEulerAngles());
-
-  if (playerId === this._getLocalPlayerId()) {
-    this._sendLocalMoveNow();
-  }
-};
-
-ManhuntManager.prototype._sendLocalMoveNow = function () {
-  var entity = this._getLocalPlayerEntity();
-  if (!entity || !this.networkClient || !this.networkClient.sendMove) {
-    return;
-  }
-
-  this.networkClient.sendMove(entity.getPosition(), entity.getEulerAngles().y, this._getLocalPlayerDisplayName());
-};
-
-ManhuntManager.prototype._checkLocalSafeZoneEntry = function () {
-  var localId = this._getLocalPlayerId();
-  var hider = this.players[localId];
-  if (!hider || hider.team !== "hider" || hider.isTagged || hider.isSafe) {
-    return;
-  }
-
-  if (!this._isPlayerInSafeZone(localId)) {
-    return;
-  }
-
-  if (!this._sendManhuntEvent({ type: "hiderSafe", roundId: this.roundId, hiderId: localId })) {
-    this._markHiderSafe(localId, false);
-  }
-};
-
-ManhuntManager.prototype._markHiderSafe = function (hiderId, fromNetwork) {
-  var hider = this.players[hiderId];
-  if (!hider || hider.team !== "hider" || hider.isTagged || hider.isSafe) {
-    return;
-  }
-
-  hider.isSafe = true;
-  hider.roundPoints += 3;
-  var name = this._getPlayerDisplayName(hiderId);
-  console.log("[Manhunt] safe zone entry: " + name + " +3" + (fromNetwork ? " (network)" : ""));
-  console.log("[Manhunt] scoring: " + name + " now has " + hider.roundPoints);
-
-  if (hiderId === this._getLocalPlayerId()) {
-    this._showFeedback("You made it home! +3", 3);
   }
 };
 
@@ -443,342 +129,58 @@ ManhuntManager.prototype._checkTagInput = function () {
     return;
   }
 
-  var localState = this.players[this._getLocalPlayerId()];
-  if (!localState || localState.team !== "seeker") {
+  var snapshot = this.getSnapshot();
+  if (snapshot.state !== "seekingPhase" || !snapshot.localPlayer || snapshot.localPlayer.manhuntTeam !== "seeker") {
     return;
   }
 
-  var seekerEntity = this._getPlayerEntity(localState.playerId);
-  if (!seekerEntity) {
+  if (!this.networkClient || !this.networkClient.sendManhuntTagRequest) {
+    this._showFeedback("Connect to the server to tag hiders.", 1.5);
     return;
   }
 
-  var seekerPosition = seekerEntity.getPosition();
-  var closest = null;
-  var hiders = this._getHiders();
-  for (var i = 0; i < hiders.length; i++) {
-    var hider = hiders[i];
-    if (hider.isTagged || hider.isSafe) {
-      continue;
-    }
-
-    var hiderEntity = this._getPlayerEntity(hider.playerId);
-    if (!hiderEntity) {
-      continue;
-    }
-
-    var distance = seekerPosition.distance(hiderEntity.getPosition());
-    if (distance <= this.tagDistance && (!closest || distance < closest.distance)) {
-      closest = { hider: hider, distance: distance };
-    }
-  }
-
-  if (!closest) {
-    this._showFeedback("No active hider is close enough to tag.", 1.5);
-    return;
-  }
-
-  if (!this._sendManhuntEvent({
-    type: "tagHider",
-    roundId: this.roundId,
-    seekerId: localState.playerId,
-    hiderId: closest.hider.playerId
-  })) {
-    this._markHiderTagged(closest.hider.playerId, localState.playerId, false);
-  }
+  console.log("[Manhunt] sending authoritative tag request");
+  this.networkClient.sendManhuntTagRequest();
 };
 
-ManhuntManager.prototype._markHiderTagged = function (hiderId, seekerId, fromNetwork) {
-  var hider = this.players[hiderId];
-  var seeker = this.players[seekerId];
-  if (!hider || !seeker || hider.team !== "hider" || seeker.team !== "seeker" || hider.isTagged || hider.isSafe) {
-    return;
+ManhuntManager.prototype._isLocalPlayerInSafeZone = function (snapshot) {
+  var local = this._getLocalPlayerEntity();
+  if (!local) {
+    return false;
   }
 
-  hider.isTagged = true;
-  seeker.roundPoints += 3;
-  console.log("[Manhunt] tag: " + this._getPlayerDisplayName(seekerId) + " tagged " + this._getPlayerDisplayName(hiderId) + (fromNetwork ? " (network)" : ""));
-  console.log("[Manhunt] scoring: " + this._getPlayerDisplayName(seekerId) + " +3 = " + seeker.roundPoints);
-
-  if (seekerId === this._getLocalPlayerId()) {
-    this._showFeedback("Tagged " + this._getPlayerDisplayName(hiderId) + "! +3", 3);
-  } else if (hiderId === this._getLocalPlayerId()) {
-    this._showFeedback("You were tagged!", 3);
-  }
-};
-
-ManhuntManager.prototype._endRoundIfComplete = function () {
-  var hiders = this._getHiders();
-  for (var i = 0; i < hiders.length; i++) {
-    if (!hiders[i].isTagged && !hiders[i].isSafe) {
-      return;
-    }
+  var pos = local.getPosition();
+  var center = this.safeZoneEntity ? this.safeZoneEntity.getPosition() : null;
+  var radius = this.safeZoneRadius;
+  if (!center && snapshot) {
+    center = new pc.Vec3(snapshot.safeZoneX || 0, snapshot.safeZoneY || 0, snapshot.safeZoneZ || 0);
+    radius = snapshot.safeZoneRadius || radius;
   }
 
-  this._finishRound("All hiders are safe or tagged!");
-};
-
-ManhuntManager.prototype._finishRound = function (reason) {
-  if (this.state === "roundOver") {
-    return;
-  }
-
-  if (!this.hasAwardedEndOfRoundPoints) {
-    this._awardEndOfRoundPoints();
-  }
-
-  this.results = this._allPlayerStates().map(this._copyPlayerState);
-  this._teleportAll(this.lobbySpawn);
-  this._setState("roundOver", this.resultsSeconds, reason);
-};
-
-ManhuntManager.prototype._awardEndOfRoundPoints = function () {
-  var hiders = this._getHiders();
-  var failedHiderCount = 0;
-  for (var i = 0; i < hiders.length; i++) {
-    if (!hiders[i].isSafe) {
-      failedHiderCount += 1;
-    }
-  }
-
-  for (var h = 0; h < hiders.length; h++) {
-    if (!hiders[h].isTagged && !hiders[h].isSafe) {
-      hiders[h].roundPoints += 1;
-      console.log("[Manhunt] scoring: " + this._getPlayerDisplayName(hiders[h].playerId) + " survived +1");
-    }
-  }
-
-  var seekers = this._getSeekers();
-  for (var s = 0; s < seekers.length; s++) {
-    var points = failedHiderCount;
-    seekers[s].roundPoints += points;
-    console.log("[Manhunt] scoring: " + this._getPlayerDisplayName(seekers[s].playerId) + " failed hiders " + failedHiderCount + " +" + points);
-  }
-
-  this.hasAwardedEndOfRoundPoints = true;
-};
-
-ManhuntManager.prototype._isLocalPlayerInSafeZone = function () {
-  if (!this.safeZoneEntity) {
-    console.warn("[Manhunt] safeZoneEntity missing; allowing start for debugging only.");
+  if (!center) {
+    console.warn("[Manhunt] safeZoneEntity missing; server will make final start decision.");
     return true;
   }
 
-  return this._isPlayerInSafeZone(this._getLocalPlayerId());
-};
-
-ManhuntManager.prototype._isPlayerInSafeZone = function (playerId) {
-  if (!this.safeZoneEntity) {
-    return false;
-  }
-
-  var entity = this._getPlayerEntity(playerId);
-  if (!entity) {
-    return false;
-  }
-
-  return entity.getPosition().distance(this.safeZoneEntity.getPosition()) <= this.safeZoneRadius;
-};
-
-ManhuntManager.prototype._getPlayerIds = function () {
-  var players = this._getAllPlayerEntities();
-  return Object.keys(players).filter(function (playerId) {
-    return !!players[playerId];
-  });
-};
-
-ManhuntManager.prototype._getLocalPlayerId = function () {
-  if (this.networkClient && this.networkClient.getLocalPlayerId) {
-    return this.networkClient.getLocalPlayerId();
-  }
-
-  return this.networkClient && this.networkClient.sessionId ? this.networkClient.sessionId : "";
-};
-
-ManhuntManager.prototype._getPlayerEntity = function (playerId) {
-  if (!playerId) {
-    return null;
-  }
-
-  if (this.networkClient && this.networkClient.getLocalPlayerId && playerId === this.networkClient.getLocalPlayerId()) {
-    return this.networkClient.getLocalPlayerEntity ? this.networkClient.getLocalPlayerEntity() : this.localPlayerEntity;
-  }
-
-  var remotes = this._getRemotePlayerEntities();
-  return remotes[playerId] || null;
-};
-
-ManhuntManager.prototype._getAllPlayerEntities = function () {
-  var players = {};
-  var localId = this._getLocalPlayerId();
-  if (localId) {
-    players[localId] = this._getLocalPlayerEntity();
-  }
-
-  var remotes = this._getRemotePlayerEntities();
-  for (var remoteId in remotes) {
-    if (Object.prototype.hasOwnProperty.call(remotes, remoteId)) {
-      players[remoteId] = remotes[remoteId];
-    }
-  }
-
-  return players;
-};
-
-ManhuntManager.prototype._getLocalPlayerEntity = function () {
-  if (this.networkClient && this.networkClient.getLocalPlayerEntity) {
-    return this.networkClient.getLocalPlayerEntity();
-  }
-
-  return this.localPlayerEntity || null;
-};
-
-ManhuntManager.prototype._getRemotePlayerEntities = function () {
-  if (this.remotePlayerManager && this.remotePlayerManager.getRemotePlayerEntities) {
-    return this.remotePlayerManager.getRemotePlayerEntities();
-  }
-
-  return this.remotePlayerManager && this.remotePlayerManager.remoteEntities ? this.remotePlayerManager.remoteEntities : {};
-};
-
-ManhuntManager.prototype._getRemotePlayerCount = function () {
-  if (this.remotePlayerManager && this.remotePlayerManager.getVisibleRemoteCount) {
-    return this.remotePlayerManager.getVisibleRemoteCount();
-  }
-
-  if (this.networkClient && this.networkClient.getRemotePlayerCount) {
-    return this.networkClient.getRemotePlayerCount();
-  }
-
-  return Object.keys(this._getRemotePlayerEntities()).length;
-};
-
-ManhuntManager.prototype._getPlayerDisplayName = function (playerId) {
-  if (!playerId) {
-    return "Student";
-  }
-
-  if (playerId === this._getLocalPlayerId()) {
-    return this._getLocalPlayerDisplayName();
-  }
-
-  var profile = this.remotePlayerManager && this.remotePlayerManager.remoteProfiles ? this.remotePlayerManager.remoteProfiles[playerId] : null;
-  if (profile && profile.name) {
-    return profile.name;
-  }
-
-  var entity = this._getPlayerEntity(playerId);
-  if (entity && entity.name && entity.name.indexOf("Remote_") !== 0) {
-    return entity.name;
-  }
-
-  return "Player " + this._shortId(playerId);
-};
-
-ManhuntManager.prototype._getLocalPlayerDisplayName = function () {
-  var profile = null;
-  if (this.networkClient && this.networkClient.getLocalPlayerProfile) {
-    profile = this.networkClient.getLocalPlayerProfile();
-  } else if (this.networkClient && this.networkClient.selectedProfile) {
-    profile = this.networkClient.selectedProfile;
-  } else if (this.app && this.app.arcadePlayerProfile) {
-    profile = this.app.arcadePlayerProfile;
-  } else if (typeof window !== "undefined" && window.ArcadePlayerProfile) {
-    profile = window.ArcadePlayerProfile;
-  }
-
-  return profile && profile.name ? profile.name : "You";
-};
-
-ManhuntManager.prototype._shortId = function (playerId) {
-  return String(playerId || "????").slice(0, 4);
-};
-
-ManhuntManager.prototype._getHiders = function () {
-  return this._allPlayerStates().filter(function (player) {
-    return player.team === "hider";
-  });
-};
-
-ManhuntManager.prototype._getSeekers = function () {
-  return this._allPlayerStates().filter(function (player) {
-    return player.team === "seeker";
-  });
-};
-
-ManhuntManager.prototype._allPlayerStates = function () {
-  var ids = Object.keys(this.players);
-  var states = [];
-  for (var i = 0; i < ids.length; i++) {
-    states.push(this.players[ids[i]]);
-  }
-  return states;
-};
-
-ManhuntManager.prototype._countHidersByFlag = function (flagName) {
-  var count = 0;
-  var hiders = this._getHiders();
-  for (var i = 0; i < hiders.length; i++) {
-    if (hiders[i][flagName]) {
-      count += 1;
-    }
-  }
-  return count;
-};
-
-ManhuntManager.prototype._copyPlayerState = function (player) {
-  return {
-    playerId: player.playerId,
-    team: player.team,
-    isTagged: player.isTagged,
-    isSafe: player.isSafe,
-    roundPoints: player.roundPoints
-  };
-};
-
-ManhuntManager.prototype._resolveScript = function (entity, scriptName) {
-  if (!entity || !entity.script || !entity.script[scriptName]) {
-    return null;
-  }
-
-  return entity.script[scriptName];
-};
-
-ManhuntManager.prototype._validateSetup = function () {
-  if (!this.networkClient) {
-    console.warn("[Manhunt] networkManagerEntity is missing ArcadeNetworkClient.");
-  }
-  if (!this.remotePlayerManager) {
-    console.warn("[Manhunt] remotePlayerManagerEntity is missing RemotePlayerManager; remoteEntities will be unavailable.");
-  }
-  if (!this.localPlayerEntity && !this._getLocalPlayerEntity()) {
-    console.warn("[Manhunt] localPlayerEntity is not configured.");
-  }
-  if (!this.lobbySpawn || !this.hiderStart || !this.seekerStart) {
-    console.warn("[Manhunt] one or more spawn entities are not configured.");
-  }
-  if (!this.safeZoneEntity) {
-    console.warn("[Manhunt] safeZoneEntity is not configured; start gating falls back to debug-only allow and safe scoring is disabled.");
-  }
+  return pos.distance(center) <= radius;
 };
 
 ManhuntManager.prototype._createSideHud = function () {
   var root = document.createElement("div");
-  root.setAttribute("aria-label", "Manhunt status HUD");
+  root.setAttribute("aria-label", "Manhunt status");
   root.style.position = "fixed";
   root.style.right = "18px";
   root.style.top = "18px";
-  root.style.zIndex = "9100";
-  root.style.minWidth = "270px";
-  root.style.maxWidth = "360px";
+  root.style.left = "unset";
+  root.style.width = "310px";
+  root.style.zIndex = "9050";
   root.style.padding = "14px 16px";
   root.style.borderRadius = "18px";
-  root.style.background = "rgba(8, 18, 32, 0.88)";
+  root.style.background = "rgba(8, 16, 30, 0.88)";
   root.style.border = "2px solid rgba(122, 211, 255, 0.9)";
-  root.style.boxShadow = "0 12px 32px rgba(0, 0, 0, 0.35)";
   root.style.color = "#ffffff";
   root.style.font = "700 14px/1.35 Arial, sans-serif";
-  root.style.textShadow = "0 1px 2px rgba(0, 0, 0, 0.85)";
+  root.style.boxShadow = "0 10px 30px rgba(0, 0, 0, 0.35)";
   root.style.pointerEvents = "none";
   document.body.appendChild(root);
   return root;
@@ -786,13 +188,13 @@ ManhuntManager.prototype._createSideHud = function () {
 
 ManhuntManager.prototype._createCenterOverlay = function () {
   var root = document.createElement("div");
-  root.setAttribute("aria-label", "Manhunt major message");
+  root.setAttribute("aria-live", "polite");
   root.style.position = "fixed";
   root.style.left = "50%";
   root.style.top = "50%";
   root.style.transform = "translate(-50%, -50%)";
-  root.style.zIndex = "9300";
-  root.style.width = "min(720px, calc(100vw - 48px))";
+  root.style.zIndex = "9100";
+  root.style.maxWidth = "min(720px, calc(100vw - 48px))";
   root.style.padding = "26px 30px";
   root.style.borderRadius = "24px";
   root.style.background = "rgba(5, 12, 24, 0.93)";
@@ -814,32 +216,30 @@ ManhuntManager.prototype._renderUi = function () {
 };
 
 ManhuntManager.prototype._renderSideHud = function () {
-  if (!this._hudRoot) {
-    return;
-  }
+  if (!this._hudRoot) return;
 
   var snapshot = this.getSnapshot();
   var local = snapshot.localPlayer;
-  var team = local ? this._formatTeam(local.team) : "Gathering players";
-  var objective = this._getObjectiveText(local);
-  var phase = this._formatPhase(snapshot.state);
+  var team = local ? this._formatTeam(local.manhuntTeam) : "Unassigned";
+  var points = local ? local.manhuntPoints || 0 : 0;
+  var objective = this._getObjectiveText(snapshot.state, local);
+  var badgeColor = local && local.manhuntTeam === "seeker" ? "#ff7a7a" : "#7cff8a";
   var timerLabel = snapshot.state === "lobby" ? "--" : snapshot.timerSeconds + "s";
 
   this._hudRoot.innerHTML = "" +
     "<div style='font-size:22px;margin-bottom:8px;color:#7ad3ff;'>Manhunt</div>" +
-    "<div>Phase: " + ManhuntManager.escapeHtml(phase) + "</div>" +
-    "<div>Team: " + ManhuntManager.escapeHtml(team) + "</div>" +
+    "<div>Phase: " + ManhuntManager.escapeHtml(this._formatPhase(snapshot.state)) + "</div>" +
+    "<div style='margin:10px 0 6px;padding:8px;border-radius:12px;background:rgba(255,255,255,0.08);font-size:26px;color:" + badgeColor + ";text-align:center;'>" + ManhuntManager.escapeHtml(team.toUpperCase()) + "</div>" +
     "<div>Timer: " + ManhuntManager.escapeHtml(timerLabel) + "</div>" +
     "<div>Hiders safe/tagged: " + snapshot.hidersSafe + "/" + snapshot.hidersTagged + " of " + snapshot.hiderTotal + "</div>" +
+    "<div>Points: " + points + "</div>" +
     "<div style='margin-top:8px;color:#ffd166;'>Objective</div>" +
     "<div style='font-weight:800;'>" + ManhuntManager.escapeHtml(objective) + "</div>" +
     "<div style='margin-top:8px;font-weight:700;'>" + ManhuntManager.escapeHtml(snapshot.message) + "</div>";
 };
 
 ManhuntManager.prototype._renderCenterOverlay = function () {
-  if (!this._overlayRoot) {
-    return;
-  }
+  if (!this._overlayRoot) return;
 
   var html = this._getCenterOverlayHtml();
   if (!html) {
@@ -857,85 +257,118 @@ ManhuntManager.prototype._getCenterOverlayHtml = function () {
     return "<div style='font-size:44px;color:#ffd166;'>" + ManhuntManager.escapeHtml(this._feedbackText) + "</div>";
   }
 
-  var local = this.players[this._getLocalPlayerId()];
-  if (this.state === "countdown" && local) {
-    var isHider = local.team === "hider";
+  var snapshot = this.getSnapshot();
+  var local = snapshot.localPlayer;
+  if ((snapshot.state === "countdown" || snapshot.state === "hidingPhase" || snapshot.state === "seekingPhase") && local) {
+    var isHider = local.manhuntTeam === "hider";
     var title = isHider ? "YOU ARE A HIDER" : "YOU ARE THE SEEKER";
-    var instruction = isHider ? "Run to Home Base without getting tagged." : "Wait for the head start, then tag hiders with E.";
+    var instruction = this._getObjectiveText(snapshot.state, local);
+    var phaseLine = "";
+    if (snapshot.state === "countdown") phaseLine = "Round starts in " + Math.max(1, snapshot.timerSeconds);
+    if (snapshot.state === "hidingPhase") phaseLine = isHider ? "RUN TO HOME BASE!" : "WAIT FOR RELEASE";
+    if (snapshot.state === "seekingPhase") phaseLine = isHider ? "RUN TO HOME BASE!" : "SEEKERS RELEASED!";
+
     return "" +
       "<div style='font-size:48px;color:" + (isHider ? "#7CFF8A" : "#FF7A7A") + ";letter-spacing:1px;'>" + title + "</div>" +
       "<div style='font-size:24px;margin-top:10px;'>" + ManhuntManager.escapeHtml(instruction) + "</div>" +
-      "<div style='font-size:36px;margin-top:20px;color:#ffd166;'>Round starts in " + Math.max(1, Math.ceil(this.stateTimeRemaining)) + "</div>";
+      "<div style='font-size:36px;margin-top:20px;color:#ffd166;'>" + ManhuntManager.escapeHtml(phaseLine) + "</div>";
   }
 
-  if (this.state === "roundOver") {
-    return this._getResultsHtml();
+  if (snapshot.state === "roundOver") {
+    return this._getResultsHtml(snapshot);
   }
 
   return "";
 };
 
-ManhuntManager.prototype._getResultsHtml = function () {
-  var rows = this.results.map(function (player) {
-    var status = player.team === "hider" ? (player.isSafe ? "Safe" : (player.isTagged ? "Tagged" : "Survived")) : "Seeker";
+ManhuntManager.prototype._getResultsHtml = function (snapshot) {
+  var rows = snapshot.results.map(function (player) {
+    var status = player.manhuntTeam === "hider" ? (player.manhuntStatus === "safe" ? "Safe" : (player.manhuntStatus === "tagged" ? "Tagged" : "Survived")) : "Seeker";
     return "<tr>" +
-      "<td style='text-align:left;padding:5px 10px;'>" + ManhuntManager.escapeHtml(this._getPlayerDisplayName(player.playerId)) + "</td>" +
-      "<td style='padding:5px 10px;'>" + ManhuntManager.escapeHtml(this._formatTeam(player.team)) + "</td>" +
+      "<td style='text-align:left;padding:5px 10px;'>" + ManhuntManager.escapeHtml(this._getPlayerDisplayName(player.sessionId)) + "</td>" +
+      "<td style='padding:5px 10px;'>" + ManhuntManager.escapeHtml(this._formatTeam(player.manhuntTeam)) + "</td>" +
       "<td style='padding:5px 10px;'>" + ManhuntManager.escapeHtml(status) + "</td>" +
-      "<td style='padding:5px 10px;'>" + player.roundPoints + " pts</td>" +
+      "<td style='padding:5px 10px;'>" + (player.manhuntPoints || 0) + " pts</td>" +
     "</tr>";
   }, this).join("");
 
   return "" +
-    "<div style='font-size:48px;color:#ffd166;'>Round Over</div>" +
-    "<div style='font-size:20px;margin:6px 0 16px;'>" + ManhuntManager.escapeHtml(this.message) + "</div>" +
+    "<div style='font-size:48px;color:#ffd166;'>ROUND OVER</div>" +
+    "<div style='font-size:20px;margin:6px 0 16px;'>" + ManhuntManager.escapeHtml(snapshot.message) + "</div>" +
     "<table style='width:100%;border-collapse:collapse;font-size:18px;'>" + rows + "</table>" +
-    "<div style='font-size:18px;margin-top:16px;'>Returning to free roam in " + Math.max(1, Math.ceil(this.stateTimeRemaining)) + "...</div>";
+    "<div style='font-size:18px;margin-top:16px;'>Returning to free roam in " + Math.max(1, snapshot.timerSeconds) + "...</div>";
 };
 
-ManhuntManager.prototype._getObjectiveText = function (local) {
-  if (this.state === "lobby") {
-    return "Go to Home Base and press M to start Manhunt.";
-  }
-
-  if (!local) {
-    return "Wait for teams.";
-  }
-
-  if (this.state === "countdown") {
-    return local.team === "hider" ? "Get ready to run home." : "Get ready to wait for release.";
-  }
-
-  if (this.state === "hidingPhase") {
-    return local.team === "hider" ? "Run to Home Base!" : "Wait for release.";
-  }
-
-  if (this.state === "seekingPhase") {
-    if (local.team === "hider") {
-      if (local.isSafe) return "You are safe at Home Base.";
-      if (local.isTagged) return "You were tagged. Cheer on the others!";
+ManhuntManager.prototype._getObjectiveText = function (state, local) {
+  if (state === "lobby") return "Go to Home Base and press M to start Manhunt.";
+  if (!local || local.manhuntTeam === "none") return "Wait for teams.";
+  if (state === "countdown") return local.manhuntTeam === "hider" ? "Get ready… reach Home Base without getting tagged." : "Get ready… you will tag hiders with E.";
+  if (state === "hidingPhase") return local.manhuntTeam === "hider" ? "Run to Home Base!" : "Wait for release.";
+  if (state === "seekingPhase") {
+    if (local.manhuntTeam === "hider") {
+      if (local.manhuntStatus === "safe") return "You are safe at Home Base.";
+      if (local.manhuntStatus === "tagged") return "You were tagged. Cheer on the others!";
       return "Reach Home Base without getting tagged.";
     }
     return "Tag hiders with E.";
   }
-
   return "Read the results, then get ready for the next round.";
 };
 
+ManhuntManager.prototype._playersToResults = function (players) {
+  var results = [];
+  for (var sessionId in players) {
+    if (Object.prototype.hasOwnProperty.call(players, sessionId)) {
+      var player = players[sessionId];
+      if (player.manhuntTeam && player.manhuntTeam !== "none") {
+        results.push(player);
+      }
+    }
+  }
+  results.sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); });
+  return results;
+};
+
+ManhuntManager.prototype._getPlayersByTeam = function (players, team) {
+  var list = [];
+  for (var sessionId in players) {
+    if (Object.prototype.hasOwnProperty.call(players, sessionId) && players[sessionId].manhuntTeam === team) {
+      list.push(players[sessionId]);
+    }
+  }
+  return list;
+};
+
+ManhuntManager.prototype._countHidersByStatus = function (hiders, status) {
+  var count = 0;
+  for (var i = 0; i < hiders.length; i++) {
+    if (hiders[i].manhuntStatus === status) count += 1;
+  }
+  return count;
+};
+
+ManhuntManager.prototype._getLocalPlayerId = function () {
+  return this.networkClient && this.networkClient.getLocalPlayerId ? this.networkClient.getLocalPlayerId() : "";
+};
+
+ManhuntManager.prototype._getLocalPlayerEntity = function () {
+  if (this.networkClient && this.networkClient.getLocalPlayerEntity) return this.networkClient.getLocalPlayerEntity();
+  return this.localPlayerEntity || null;
+};
+
+ManhuntManager.prototype._getPlayerDisplayName = function (sessionId) {
+  if (this.networkClient && this.networkClient.getPlayerDisplayName) return this.networkClient.getPlayerDisplayName(sessionId);
+  return sessionId ? "Player " + String(sessionId).slice(0, 4) : "Student";
+};
+
 ManhuntManager.prototype._formatPhase = function (state) {
-  return {
-    lobby: "Free Roam",
-    countdown: "Team Reveal",
-    hidingPhase: "Hider Head Start",
-    seekingPhase: "Seekers Released",
-    roundOver: "Round Over"
-  }[state] || state;
+  return { lobby: "Free Roam", countdown: "Team Reveal", hidingPhase: "Hider Head Start", seekingPhase: "Seekers Released", roundOver: "Round Over" }[state] || state;
 };
 
 ManhuntManager.prototype._formatTeam = function (team) {
   if (team === "hider") return "Hider";
   if (team === "seeker") return "Seeker";
-  return team || "Unassigned";
+  return "Unassigned";
 };
 
 ManhuntManager.prototype._showFeedback = function (text, seconds) {
@@ -944,27 +377,22 @@ ManhuntManager.prototype._showFeedback = function (text, seconds) {
   this._renderUi();
 };
 
-ManhuntManager.prototype._logPlayerDebug = function (reason) {
-  console.log("[Manhunt] debug " + reason + ": local=" + this._getLocalPlayerDisplayName() + " (" + this._shortId(this._getLocalPlayerId()) + "), remotes=" + this._getRemotePlayerCount());
+ManhuntManager.prototype._resolveScript = function (entity, scriptName) {
+  return entity && entity.script && entity.script[scriptName] ? entity.script[scriptName] : null;
+};
+
+ManhuntManager.prototype._validateSetup = function () {
+  if (!this.networkClient) console.warn("[Manhunt] networkManagerEntity is missing ArcadeNetworkClient.");
+  if (!this.safeZoneEntity) console.warn("[Manhunt] safeZoneEntity is missing; client-side start check will defer to server.");
 };
 
 ManhuntManager.prototype._onDestroy = function () {
-  if (this._hudRoot && this._hudRoot.parentNode) {
-    this._hudRoot.parentNode.removeChild(this._hudRoot);
-  }
-  if (this._overlayRoot && this._overlayRoot.parentNode) {
-    this._overlayRoot.parentNode.removeChild(this._overlayRoot);
-  }
+  if (this._hudRoot && this._hudRoot.parentNode) this._hudRoot.parentNode.removeChild(this._hudRoot);
+  if (this._overlayRoot && this._overlayRoot.parentNode) this._overlayRoot.parentNode.removeChild(this._overlayRoot);
 };
 
 ManhuntManager.escapeHtml = function (value) {
   return String(value).replace(/[&<>'"]/g, function (character) {
-    return {
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      "'": "&#39;",
-      "\"": "&quot;"
-    }[character];
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", "\"": "&quot;" }[character];
   });
 };
