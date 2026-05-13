@@ -174,9 +174,7 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
         return;
       }
 
-      if (this.shouldLockPlayerAtSeekerStart(player)) {
-        this.teleportPlayer(player, this.getSeekerStart());
-      } else {
+      if (!this.shouldLockPlayerAtSeekerStart(player)) {
         player.x = message.x;
         player.y = message.y;
         player.z = message.z;
@@ -346,10 +344,6 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
       return;
     }
 
-    if (phase === "hidingPhase") {
-      this.lockSeekersAtStart();
-    }
-
     if (phase === "seekingPhase") {
       this.checkSafeZoneEntries();
       if (this.areAllHidersResolved()) {
@@ -502,19 +496,12 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     player.x = position.x;
     player.y = position.y;
     player.z = position.z;
+    player.serverTeleportId += 1;
   }
 
   private shouldLockPlayerAtSeekerStart(player: PlayerState): boolean {
-    return player.manhuntTeam === "seeker" && this.state.manhunt.phase === "hidingPhase";
-  }
-
-  private lockSeekersAtStart(): void {
-    const start = this.getSeekerStart();
-    for (const [, player] of this.state.players.entries()) {
-      if (player.manhuntTeam === "seeker") {
-        this.teleportPlayer(player, start);
-      }
-    }
+    return player.manhuntTeam === "seeker" &&
+      (this.state.manhunt.phase === "countdown" || this.state.manhunt.phase === "hidingPhase");
   }
 
   private isPlayerInSafeZone(player: PlayerState): boolean {

@@ -149,7 +149,7 @@ RemotePlayerTemplate
 
 ## 6) Manhunt / Hide-and-Seek multiplayer setup
 
-Manhunt is now a server-authoritative multiplayer game mode. The Colyseus room owns the round phase, countdown timer, team assignments, safe/tagged status, points, and server-side teleports. PlayCanvas clients only request actions and render the synchronized state they receive from the room schema.
+Manhunt uses a hybrid classroom-playtest model: local movement is client-authoritative for smooth feel, while the Colyseus room remains authoritative for round phase, team assignments, safe/tagged status, points, rule validation, and explicit server teleports. PlayCanvas clients send movement snapshots for server-side Manhunt checks and render synchronized state from the room schema.
 
 ### Scripts to attach or update
 
@@ -161,17 +161,18 @@ Manhunt is now a server-authoritative multiplayer game mode. The Colyseus room o
   - The center overlay shows team reveal, synchronized countdown, phase-change instructions, and readable round-over results.
 - `ArcadeNetworkClient.js` listens to the server `manhunt` schema plus Manhunt feedback messages.
   - It exposes `getManhuntState()`, `getLocalManhuntTeam()`, `getLocalManhuntStatus()`, `getPlayerManhuntTeam(sessionId)`, `getPlayerDisplayName(sessionId)`, `isManhuntActive()`, `sendManhuntStartRequest()`, and `sendManhuntTagRequest()` for UI and nameplate code.
-  - It applies large authoritative server position corrections to the local player so server teleports to hider/seeker/lobby starts are visible in every browser.
-- `RemotePlayerManager.js` keeps DOM nameplates but applies Manhunt visibility rules.
+  - It applies local player position changes only when the server increments `serverTeleportId`, so normal server movement echoes do not fight local physics.
+  - Enable `showMovementDebug` temporarily to display local velocity/position, the server-known local position, local/server difference, teleport id, and remote interpolation distance in-game.
+- `RemotePlayerManager.js` keeps DOM nameplates, applies Manhunt visibility rules, and interpolates remote avatars toward their latest server targets. Large jumps or changed `serverTeleportId` snap immediately.
   - In lobby/free roam and round-over results, all nametags may be shown.
   - During `countdown`, `hidingPhase`, and `seekingPhase`, remote nametags are shown only for same-team players and are hidden for opponents.
-- Keep `LocalPlayerController.js` on the local player for movement. It continues sending movement packets, but the server can override positions for Manhunt teleports and seeker lock during the hider head start.
+- Keep `LocalPlayerController.js` on the local player for movement. It continues sending movement packets at a fixed interval, applies a local seeker movement lock during `countdown`/`hidingPhase`, and only accepts explicit server teleports instead of continuous position correction.
 
 ### Server expectations
 
 - Run the Colyseus server from `/server` so clients join the shared `arcade_lobby` room.
 - The room schema contains `state.manhunt` with phases `lobby`, `countdown`, `hidingPhase`, `seekingPhase`, and `roundOver`.
-- Each `PlayerState` includes `manhuntTeam`, `manhuntStatus`, `manhuntPoints`, `totalPoints`, and `isInManhuntRound`.
+- Each `PlayerState` includes `manhuntTeam`, `manhuntStatus`, `manhuntPoints`, `totalPoints`, `isInManhuntRound`, and `serverTeleportId`.
 - Clients send:
   - `manhunt:startRequest` when the player presses **M** at Home Base.
   - `manhunt:tagRequest` when a seeker presses **E** during the seeking phase.

@@ -1,4 +1,4 @@
-/* global Colyseus, pc, window */
+/* global Colyseus, pc, window, document */
 
 var ArcadeNetworkClient = pc.createScript("arcadeNetworkClient");
 
@@ -49,6 +49,12 @@ ArcadeNetworkClient.attributes.add("enableOfflineFallback", {
   title: "Enable Offline Fallback"
 });
 
+ArcadeNetworkClient.attributes.add("showMovementDebug", {
+  type: "boolean",
+  default: false,
+  title: "Show Movement Debug HUD"
+});
+
 ArcadeNetworkClient.prototype.initialize = function () {
   this.callbacks = {
     connected: [],
@@ -70,7 +76,9 @@ ArcadeNetworkClient.prototype.initialize = function () {
   this._hasBoundManhuntMessages = false;
   this._hasBoundManhuntState = false;
   this._knownPlayers = {};
-  this._lastAppliedServerPosition = null;
+  this._lastAppliedServerTeleportId = 0;
+  this._lastLocalServerPayload = null;
+  this._movementDebugHud = null;
   this._isOfflineMode = false;
   this._isConnecting = false;
   this.selectedProfile = null;
@@ -197,6 +205,8 @@ ArcadeNetworkClient.prototype._connect = async function () {
   }
 
   this.sessionId = this.room.sessionId;
+  this._lastAppliedServerTeleportId = 0;
+  this._lastLocalServerPayload = null;
   this.isConnected = true;
   this.lastNetworkError = "";
   console.log("[ArcadeNetworkClient] Joined room", this._roomName, this.sessionId);
@@ -299,7 +309,12 @@ ArcadeNetworkClient.prototype._enableLocalControlScripts = function (localEntity
     console.log("[ArcadeNetworkClient] Local player controller enabled");
   }
   if (scripts.characterController) {
-    scripts.characterController.enabled = true;
+    if (scripts.localPlayerController) {
+      scripts.characterController.enabled = false;
+      console.warn("[ArcadeNetworkClient] Both localPlayerController and characterController are present. Keeping characterController disabled to avoid movement jitter.");
+    } else {
+      scripts.characterController.enabled = true;
+    }
   }
   if (scripts.firstPersonCamera) {
     scripts.firstPersonCamera.enabled = true;
@@ -350,6 +365,7 @@ ArcadeNetworkClient.prototype._bindStateListeners = function () {
     playerCallbacks.listen("manhuntPoints", emitPlayerUpdate);
     playerCallbacks.listen("totalPoints", emitPlayerUpdate);
     playerCallbacks.listen("isInManhuntRound", emitPlayerUpdate);
+    playerCallbacks.listen("serverTeleportId", emitPlayerUpdate);
   });
 
   stateCallbacks.players.onRemove(function (_player, sessionId) {
@@ -394,27 +410,24 @@ ArcadeNetworkClient.prototype._maybeApplyLocalServerPosition = function (payload
     return;
   }
 
-  if (!payload.isInManhuntRound && !this.isManhuntActive()) {
+  this._lastLocalServerPayload = payload;
+  var teleportId = typeof payload.serverTeleportId === "number" ? payload.serverTeleportId : 0;
+
+  // Classroom playtest movement is client-authoritative for feel. Server x/y/z
+  // echoes are still used for Manhunt validation, but the local physics body is
+  // only moved when the server marks an intentional teleport with this sequence.
+  if (teleportId <= this._lastAppliedServerTeleportId) {
     return;
   }
 
-  var current = local.getPosition();
-  var dx = current.x - payload.x;
-  var dy = current.y - payload.y;
-  var dz = current.z - payload.z;
-  var distanceSq = dx * dx + dy * dy + dz * dz;
-  if (distanceSq < 1) {
-    return;
-  }
-
+  this._lastAppliedServerTeleportId = teleportId;
   var position = new pc.Vec3(payload.x, payload.y, payload.z);
   if (local.rigidbody && local.rigidbody.teleport) {
     local.rigidbody.teleport(position);
-    local.rigidbody.linearVelocity = pc.Vec3.ZERO;
   } else {
     local.setPosition(position);
   }
-  console.log("[ArcadeNetworkClient] Applied authoritative server teleport", payload);
+  console.log("[ArcadeNetworkClient] Applied explicit server teleport", payload);
 };
 
 ArcadeNetworkClient.prototype._toPlayerPayload = function (player, sessionId) {
@@ -432,7 +445,8 @@ ArcadeNetworkClient.prototype._toPlayerPayload = function (player, sessionId) {
     manhuntStatus: player.manhuntStatus || "none",
     manhuntPoints: player.manhuntPoints || 0,
     totalPoints: player.totalPoints || 0,
-    isInManhuntRound: player.isInManhuntRound === true
+    isInManhuntRound: player.isInManhuntRound === true,
+    serverTeleportId: player.serverTeleportId || 0
   };
 };
 
@@ -679,6 +693,58 @@ ArcadeNetworkClient.prototype.isManhuntActive = function () {
 
 ArcadeNetworkClient.prototype.onManhuntStateChanged = function (callback) {
   this.onEvent("manhuntStateChanged", callback);
+};
+
+ArcadeNetworkClient.prototype.update = function () {
+  this._updateMovementDebugHud();
+};
+
+ArcadeNetworkClient.prototype._updateMovementDebugHud = function () {
+  if (!this.showMovementDebug || typeof document === "undefined") {
+    if (this._movementDebugHud && this._movementDebugHud.parentNode) {
+      this._movementDebugHud.parentNode.removeChild(this._movementDebugHud);
+      this._movementDebugHud = null;
+    }
+    return;
+  }
+
+  if (!this._movementDebugHud) {
+    var hud = document.createElement("pre");
+    hud.setAttribute("aria-label", "Movement debug");
+    hud.style.position = "fixed";
+    hud.style.left = "12px";
+    hud.style.bottom = "12px";
+    hud.style.zIndex = "9500";
+    hud.style.margin = "0";
+    hud.style.padding = "8px 10px";
+    hud.style.borderRadius = "8px";
+    hud.style.background = "rgba(0, 0, 0, 0.72)";
+    hud.style.color = "#d8f7ff";
+    hud.style.font = "12px/1.35 monospace";
+    hud.style.pointerEvents = "none";
+    document.body.appendChild(hud);
+    this._movementDebugHud = hud;
+  }
+
+  var local = this.getLocalPlayerEntity();
+  var pos = local ? local.getPosition() : null;
+  var vel = local && local.rigidbody && local.rigidbody.linearVelocity ? local.rigidbody.linearVelocity : null;
+  var server = this._lastLocalServerPayload || null;
+  var diff = pos && server ? Math.sqrt(Math.pow(pos.x - server.x, 2) + Math.pow(pos.y - server.y, 2) + Math.pow(pos.z - server.z, 2)) : 0;
+  var remoteManager = this._getRemotePlayerManager();
+  var nearestRemoteDistance = remoteManager && remoteManager.getNearestTargetDistance ? remoteManager.getNearestTargetDistance() : 0;
+  var fmt = function (v) { return v ? v.x.toFixed(2) + ", " + v.y.toFixed(2) + ", " + v.z.toFixed(2) : "n/a"; };
+
+  this._movementDebugHud.textContent = [
+    "Movement Debug",
+    "local pos: " + fmt(pos),
+    "local vel: " + fmt(vel),
+    "server pos: " + (server ? [server.x.toFixed(2), server.y.toFixed(2), server.z.toFixed(2)].join(", ") : "n/a"),
+    "local/server diff: " + diff.toFixed(2),
+    "last serverTeleportId: " + this._lastAppliedServerTeleportId,
+    "nearest remote target dist: " + nearestRemoteDistance.toFixed(2),
+    "local correction: teleport-only"
+  ].join("\n");
 };
 
 ArcadeNetworkClient.prototype.getDebugSnapshot = function () {
