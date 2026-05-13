@@ -26,4 +26,5 @@ gameServer.define("arcade_lobby", LobbyRoom);
 server.listen(PORT, HOST, () => {
   console.log(`[ArcadeWorld] Colyseus listening on ws://${HOST}:${PORT}`);
   console.log("[ArcadeWorld] Room available: arcade_lobby");
+  LobbyRoom.logManhuntStartupConfig();
 });
