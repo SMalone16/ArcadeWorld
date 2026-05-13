@@ -155,6 +155,7 @@ Manhunt is now a server-authoritative multiplayer game mode. The Colyseus room o
 
 - Attach `ManhuntManager.js` to a `GameModeManager` entity or to the existing `NetworkManager` entity.
   - Assign `networkManagerEntity`, `remotePlayerManagerEntity`, `localPlayerEntity`, and `safeZoneEntity` in the Editor.
+  - The `safeZoneEntity` field must point to the actual visible SafeZone/Home Base entity, not the `GameModeManager` entity.
   - The client-side safe-zone check is only immediate feedback for pressing **M** outside Home Base; the server still enforces the real start restriction from server-tracked player positions.
   - The right-side Manhunt HUD is student-facing and shows phase, team badge, timer, objective, hider safe/tagged counts, points, and the latest server message.
   - The center overlay shows team reveal, synchronized countdown, phase-change instructions, and readable round-over results.
@@ -175,12 +176,14 @@ Manhunt is now a server-authoritative multiplayer game mode. The Colyseus room o
   - `manhunt:startRequest` when the player presses **M** at Home Base.
   - `manhunt:tagRequest` when a seeker presses **E** during the seeking phase.
 - The server validates player count, Home Base distance, seeker/hider roles, tag distance, safe-zone entry, scoring, and round reset.
+- The server owns the real Home Base validation. It cannot read PlayCanvas scene entities or collision components, so it only trusts `LobbyRoom.ts` Manhunt coordinates and player positions received through movement packets.
 
 ### Entities to create or update
 
 - `ManhuntSafeZone`
   - Add a visible flat cylinder/disc or transparent marker at the Home Base location.
-  - Match this visible marker to the server safe-zone coordinates in `server/src/rooms/LobbyRoom.ts` (`safeZoneX/Y/Z` and `safeZoneRadius`) until those values are promoted to a scene-config message.
+  - Match this visible marker to the server safe-zone coordinates in `server/src/rooms/LobbyRoom.ts` (`safeZoneX/Y/Z` and `safeZoneRadius`) until those values are promoted to a scene-config message. The current server Home Base is `x=276.6`, `y=-0.19`, `z=-222`, with radius `15`.
+  - Keep the visible SafeZone entity coordinates in PlayCanvas synchronized with these server values whenever the scene marker moves.
 - Spawn transforms
   - Hider, seeker, and lobby spawn positions are currently server-owned defaults in `LobbyRoom.ts`.
   - Keep matching PlayCanvas editor markers named clearly (for example `HiderStart`, `SeekerStart`, `LobbySpawn`) so students can understand where server teleports will place players.

@@ -28,6 +28,12 @@ const DEFAULT_HAT_ID = "No Hat";
 const SAFE_HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 const ALLOWED_HAT_IDS = new Set(["No Hat", "Top Hat", "Western"]);
 
+const MANHUNT_HOME_BASE: Vec3 = { x: 276.6, y: -0.19, z: -222 };
+const MANHUNT_SAFE_ZONE_RADIUS = 15;
+const MANHUNT_HIDER_START: Vec3 = { x: -12, y: 0, z: -12 };
+const MANHUNT_SEEKER_START: Vec3 = { x: 12, y: 0, z: 12 };
+const MANHUNT_LOBBY_SPAWN: Vec3 = { x: 0, y: 0, z: 0 };
+
 const MANHUNT_COUNTDOWN_SECONDS = 5;
 const MANHUNT_HIDING_SECONDS = 10;
 const MANHUNT_SEEKING_SECONDS = 90;
@@ -67,12 +73,33 @@ function distance(a: Vec3, b: Vec3): number {
   return Math.sqrt(dx * dx + dy * dy + dz * dz);
 }
 
+function distanceXZ(a: Vec3, b: Vec3): number {
+  const dx = a.x - b.x;
+  const dz = a.z - b.z;
+  return Math.sqrt(dx * dx + dz * dz);
+}
+
 /**
  * Single shared room for today's vertical slice.
  * Room name: arcade_lobby
  */
 export class LobbyRoom extends Room<ArcadeWorldState> {
   maxClients = 64;
+
+  static logManhuntStartupConfig(): void {
+    console.log(
+      `[Manhunt] Home Base configured at (${MANHUNT_HOME_BASE.x}, ${MANHUNT_HOME_BASE.y}, ${MANHUNT_HOME_BASE.z}), radius ${MANHUNT_SAFE_ZONE_RADIUS}`,
+    );
+    console.log(
+      `[Manhunt] HiderStart configured at (${MANHUNT_HIDER_START.x}, ${MANHUNT_HIDER_START.y}, ${MANHUNT_HIDER_START.z})`,
+    );
+    console.log(
+      `[Manhunt] SeekerStart configured at (${MANHUNT_SEEKER_START.x}, ${MANHUNT_SEEKER_START.y}, ${MANHUNT_SEEKER_START.z})`,
+    );
+    console.log(
+      `[Manhunt] LobbySpawn configured at (${MANHUNT_LOBBY_SPAWN.x}, ${MANHUNT_LOBBY_SPAWN.y}, ${MANHUNT_LOBBY_SPAWN.z})`,
+    );
+  }
 
   onCreate(): void {
     this.setState(new ArcadeWorldState());
@@ -176,19 +203,21 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     manhunt.message = "Go to Home Base and press M to start Manhunt.";
     manhunt.startedBy = "";
     // Home Base/Safe Zone and starts are shared PlayCanvas coordinates for this slice.
-    manhunt.safeZoneX = 0;
-    manhunt.safeZoneY = 0;
-    manhunt.safeZoneZ = 0;
-    manhunt.safeZoneRadius = 2.6;
-    manhunt.hiderStartX = -12;
-    manhunt.hiderStartY = 0;
-    manhunt.hiderStartZ = -12;
-    manhunt.seekerStartX = 12;
-    manhunt.seekerStartY = 0;
-    manhunt.seekerStartZ = 12;
-    manhunt.lobbySpawnX = 0;
-    manhunt.lobbySpawnY = 0;
-    manhunt.lobbySpawnZ = 0;
+    manhunt.safeZoneX = MANHUNT_HOME_BASE.x;
+    manhunt.safeZoneY = MANHUNT_HOME_BASE.y;
+    manhunt.safeZoneZ = MANHUNT_HOME_BASE.z;
+    manhunt.safeZoneRadius = MANHUNT_SAFE_ZONE_RADIUS;
+    manhunt.hiderStartX = MANHUNT_HIDER_START.x;
+    manhunt.hiderStartY = MANHUNT_HIDER_START.y;
+    manhunt.hiderStartZ = MANHUNT_HIDER_START.z;
+    manhunt.seekerStartX = MANHUNT_SEEKER_START.x;
+    manhunt.seekerStartY = MANHUNT_SEEKER_START.y;
+    manhunt.seekerStartZ = MANHUNT_SEEKER_START.z;
+    manhunt.lobbySpawnX = MANHUNT_LOBBY_SPAWN.x;
+    manhunt.lobbySpawnY = MANHUNT_LOBBY_SPAWN.y;
+    manhunt.lobbySpawnZ = MANHUNT_LOBBY_SPAWN.z;
+
+    this.logManhuntConfig();
   }
 
   private handleManhuntStartRequest(client: Client): void {
@@ -211,8 +240,24 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
       return;
     }
 
+    const requesterPosition = this.playerPosition(requester);
+    const safeZone = this.getSafeZone();
+    const fullDistance = distance(requesterPosition, safeZone);
+    const xzDistance = distanceXZ(requesterPosition, safeZone);
+    const radius = this.state.manhunt.safeZoneRadius;
+
+    console.log(
+      `[Manhunt] Home Base check: requester=${requester.name} (${client.sessionId}), ` +
+        `position=(${requesterPosition.x}, ${requesterPosition.y}, ${requesterPosition.z}), ` +
+        `safeZone=(${safeZone.x}, ${safeZone.y}, ${safeZone.z}), radius=${radius}, ` +
+        `distance=${fullDistance.toFixed(2)}, distanceXZ=${xzDistance.toFixed(2)}`,
+    );
+
     if (!this.isPlayerInSafeZone(requester)) {
-      this.rejectManhuntRequest(client, "Go to Home Base to start Manhunt.");
+      this.rejectManhuntRequest(
+        client,
+        `Go to Home Base to start Manhunt. Distance: ${xzDistance.toFixed(2)} / Radius: ${radius}`,
+      );
       return;
     }
 
@@ -430,7 +475,21 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
   }
 
   private isPlayerInSafeZone(player: PlayerState): boolean {
-    return distance(this.playerPosition(player), this.getSafeZone()) <= this.state.manhunt.safeZoneRadius;
+    return distanceXZ(this.playerPosition(player), this.getSafeZone()) <= this.state.manhunt.safeZoneRadius;
+  }
+
+  private logManhuntConfig(): void {
+    const safeZone = this.getSafeZone();
+    const hiderStart = this.getHiderStart();
+    const seekerStart = this.getSeekerStart();
+    const lobbySpawn = this.getLobbySpawn();
+
+    console.log(
+      `[Manhunt] Home Base configured at (${safeZone.x}, ${safeZone.y}, ${safeZone.z}), radius ${this.state.manhunt.safeZoneRadius}`,
+    );
+    console.log(`[Manhunt] HiderStart configured at (${hiderStart.x}, ${hiderStart.y}, ${hiderStart.z})`);
+    console.log(`[Manhunt] SeekerStart configured at (${seekerStart.x}, ${seekerStart.y}, ${seekerStart.z})`);
+    console.log(`[Manhunt] LobbySpawn configured at (${lobbySpawn.x}, ${lobbySpawn.y}, ${lobbySpawn.z})`);
   }
 
   private areAllHidersResolved(): boolean {
