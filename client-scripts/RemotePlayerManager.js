@@ -25,6 +25,20 @@ RemotePlayerManager.attributes.add("nameplateHeightOffset", {
   title: "Nameplate Height Offset"
 });
 
+RemotePlayerManager.attributes.add("interpolationSpeed", {
+  type: "number",
+  default: 15,
+  min: 0,
+  title: "Remote Interpolation Speed"
+});
+
+RemotePlayerManager.attributes.add("snapDistance", {
+  type: "number",
+  default: 10,
+  min: 0,
+  title: "Remote Snap Distance"
+});
+
 /**
  * Creates lightweight placeholder avatars for remote players.
  * Keeps scene/editor setup easy for teachers and students.
@@ -32,6 +46,7 @@ RemotePlayerManager.attributes.add("nameplateHeightOffset", {
 RemotePlayerManager.prototype.initialize = function () {
   this.remoteEntities = {};
   this.remoteProfiles = {};
+  this.remoteTargets = {};
   this.nameplates = {};
   this._screenPosition = new pc.Vec3();
   this._nameplateWorldPosition = new pc.Vec3();
@@ -55,7 +70,8 @@ RemotePlayerManager.prototype.initialize = function () {
   this.on("destroy", this._onDestroy, this);
 };
 
-RemotePlayerManager.prototype.update = function () {
+RemotePlayerManager.prototype.update = function (dt) {
+  this._updateRemoteInterpolation(dt || 0);
   this._updateNameplates();
 };
 
@@ -90,6 +106,7 @@ RemotePlayerManager.prototype._onRemoteAdded = function (data) {
 
   this.app.root.addChild(remote);
   this.remoteEntities[data.sessionId] = remote;
+  this._setRemoteTarget(data.sessionId, data);
   this.remoteProfiles[data.sessionId] = this._sanitizeProfile(data);
   this._applyProfile(remote, this.remoteProfiles[data.sessionId]);
   this._createOrUpdateNameplate(data.sessionId);
@@ -110,12 +127,83 @@ RemotePlayerManager.prototype._onRemoteUpdated = function (data) {
     return;
   }
 
-  remote.setPosition(data.x, data.y, data.z);
-  remote.setEulerAngles(0, (typeof data.rotY === "number" ? data.rotY : (data.yaw || 0)), 0);
+  this._setRemoteTarget(data.sessionId, data);
 
   this.remoteProfiles[data.sessionId] = this._sanitizeProfile(data);
   this._applyProfile(remote, this.remoteProfiles[data.sessionId]);
   this._createOrUpdateNameplate(data.sessionId);
+};
+
+
+RemotePlayerManager.prototype._setRemoteTarget = function (sessionId, data) {
+  var targetPosition = new pc.Vec3(data.x, data.y, data.z);
+  var rotY = typeof data.rotY === "number" ? data.rotY : (data.yaw || 0);
+  var teleportId = typeof data.serverTeleportId === "number" ? data.serverTeleportId : 0;
+  var existing = this.remoteTargets[sessionId];
+  var remote = this.remoteEntities[sessionId];
+
+  if (!existing) {
+    this.remoteTargets[sessionId] = {
+      position: targetPosition,
+      rotY: rotY,
+      serverTeleportId: teleportId,
+      snapNext: false
+    };
+    return;
+  }
+
+  var teleportChanged = teleportId !== existing.serverTeleportId;
+  existing.position.copy(targetPosition);
+  existing.rotY = rotY;
+  existing.snapNext = teleportChanged;
+  existing.serverTeleportId = teleportId;
+
+  if (teleportChanged && remote) {
+    remote.setPosition(targetPosition);
+    remote.setEulerAngles(0, rotY, 0);
+    existing.snapNext = false;
+  }
+};
+
+RemotePlayerManager.prototype._updateRemoteInterpolation = function (dt) {
+  var alpha = 1 - Math.exp(-Math.max(this.interpolationSpeed || 0, 0) * Math.max(dt || 0, 0));
+  var snapDistanceSq = Math.max(this.snapDistance || 0, 0);
+  snapDistanceSq *= snapDistanceSq;
+
+  for (var sessionId in this.remoteEntities) {
+    if (!Object.prototype.hasOwnProperty.call(this.remoteEntities, sessionId)) {
+      continue;
+    }
+
+    var remote = this.remoteEntities[sessionId];
+    var target = this.remoteTargets[sessionId];
+    if (!remote || !target) {
+      continue;
+    }
+
+    var current = remote.getPosition();
+    var dx = target.position.x - current.x;
+    var dy = target.position.y - current.y;
+    var dz = target.position.z - current.z;
+    var distanceSq = dx * dx + dy * dy + dz * dz;
+
+    if (target.snapNext || distanceSq > snapDistanceSq) {
+      remote.setPosition(target.position);
+      remote.setEulerAngles(0, target.rotY, 0);
+      target.snapNext = false;
+      continue;
+    }
+
+    remote.setPosition(
+      current.x + dx * alpha,
+      current.y + dy * alpha,
+      current.z + dz * alpha
+    );
+
+    var currentYaw = remote.getEulerAngles().y;
+    var deltaYaw = ((target.rotY - currentYaw + 540) % 360) - 180;
+    remote.setEulerAngles(0, currentYaw + deltaYaw * alpha, 0);
+  }
 };
 
 RemotePlayerManager.prototype._applyProfile = function (remote, profile) {
@@ -319,6 +407,31 @@ RemotePlayerManager.prototype.getAllPlayerEntities = function () {
   return players;
 };
 
+RemotePlayerManager.prototype.getNearestTargetDistance = function () {
+  var nearest = null;
+  for (var sessionId in this.remoteEntities) {
+    if (!Object.prototype.hasOwnProperty.call(this.remoteEntities, sessionId)) {
+      continue;
+    }
+
+    var remote = this.remoteEntities[sessionId];
+    var target = this.remoteTargets[sessionId];
+    if (!remote || !target) {
+      continue;
+    }
+
+    var current = remote.getPosition();
+    var dx = target.position.x - current.x;
+    var dy = target.position.y - current.y;
+    var dz = target.position.z - current.z;
+    var distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (nearest === null || distance < nearest) {
+      nearest = distance;
+    }
+  }
+  return nearest === null ? 0 : nearest;
+};
+
 RemotePlayerManager.prototype.getVisibleRemoteCount = function () {
   var count = 0;
   for (var sessionId in this.remoteEntities) {
@@ -342,6 +455,7 @@ RemotePlayerManager.prototype._onRemoteRemoved = function (data) {
 
   delete this.remoteEntities[data.sessionId];
   delete this.remoteProfiles[data.sessionId];
+  delete this.remoteTargets[data.sessionId];
   delete this.nameplates[data.sessionId];
 };
 

@@ -119,6 +119,7 @@ LocalPlayerController.prototype.initialize = function () {
   this._yawQuat = new pc.Quat();
   this._lastAppliedYawDegrees = null;
   this._groundRaycastFilterBound = this._isValidGroundHit.bind(this);
+  this._yawApplyDeadzoneDegrees = 0.05;
 
   this._onMouseMoveBound = this._onMouseMove.bind(this);
   this._onMouseDownBound = this._onMouseDown.bind(this);
@@ -330,7 +331,11 @@ LocalPlayerController.prototype.update = function (dt) {
 
   this._updateGroundedState();
   this._updateMovementVelocity(dt);
-  this._updateJumpCharge(dt);
+  if (this._isLocalSeekerLocked()) {
+    this._cancelJumpCharge();
+  } else {
+    this._updateJumpCharge(dt);
+  }
   this._applyCameraTransform();
 
   this.sendTimer += dt;
@@ -516,6 +521,8 @@ LocalPlayerController.prototype._updateMovementVelocity = function (_dt) {
 LocalPlayerController.prototype._readMovementInput = function () {
   this._localMoveInput.set(0, 0, 0);
 
+  if (this._isLocalSeekerLocked()) return;
+
   if (!this.app.keyboard) return;
 
   if (this.app.keyboard.isPressed(pc.KEY_A)) this._localMoveInput.x -= 1;
@@ -552,20 +559,28 @@ LocalPlayerController.prototype._buildYawRelativeMove = function () {
 };
 
 LocalPlayerController.prototype._applyBodyYaw = function () {
-  if (this._lastAppliedYawDegrees === this.yawDegrees) {
+  if (this._lastAppliedYawDegrees !== null && Math.abs(this._lastAppliedYawDegrees - this.yawDegrees) < this._yawApplyDeadzoneDegrees) {
     return;
   }
 
   this._lastAppliedYawDegrees = this.yawDegrees;
-  // Keep camera pitch on the child view while yaw is applied to the parent physics body.
-  if (!this.entity.rigidbody || this.entity.rigidbody.type !== pc.BODYTYPE_DYNAMIC) {
-    this.entity.setEulerAngles(0, this.yawDegrees, 0);
-    return;
+  // Avoid using rigidbody.teleport for normal mouse-look yaw updates. The capsule
+  // has angularFactor locked, so direct entity rotation is enough for movement
+  // direction/camera alignment and avoids physics correction jitter.
+  this.entity.setEulerAngles(0, this.yawDegrees, 0);
+  if (this.entity.rigidbody && this.entity.rigidbody.type === pc.BODYTYPE_DYNAMIC) {
+    this.entity.rigidbody.angularVelocity = pc.Vec3.ZERO;
+  }
+};
+
+LocalPlayerController.prototype._isLocalSeekerLocked = function () {
+  if (!this.networkClient || !this.networkClient.getManhuntState || !this.networkClient.getLocalManhuntTeam) {
+    return false;
   }
 
-  this._yawQuat.setFromEulerAngles(0, this.yawDegrees, 0);
-  this.entity.rigidbody.teleport(this.entity.getPosition(), this._yawQuat);
-  this.entity.rigidbody.angularVelocity = pc.Vec3.ZERO;
+  var state = this.networkClient.getManhuntState();
+  var phase = state ? state.phase : "lobby";
+  return (phase === "countdown" || phase === "hidingPhase") && this.networkClient.getLocalManhuntTeam() === "seeker";
 };
 
 LocalPlayerController.prototype._applyCameraTransform = function () {

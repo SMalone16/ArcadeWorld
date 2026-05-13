@@ -43,4 +43,7 @@ export class PlayerState extends Schema {
 
   @type("boolean")
   isInManhuntRound = false;
+
+  @type("number")
+  serverTeleportId = 0;
 }
