@@ -21,41 +21,41 @@ export class ManhuntState extends Schema {
   startedBy = "";
 
   @type("number")
-  safeZoneX = 0;
+  safeZoneX = 276.6;
 
   @type("number")
-  safeZoneY = 0;
+  safeZoneY = -0.19;
 
   @type("number")
-  safeZoneZ = 0;
+  safeZoneZ = -222;
 
   @type("number")
-  safeZoneRadius = 2.6;
+  safeZoneRadius = 15;
 
   @type("number")
-  hiderStartX = -12;
+  hiderStartX = 276.6;
 
   @type("number")
-  hiderStartY = 0;
+  hiderStartY = 1.81;
 
   @type("number")
-  hiderStartZ = -12;
+  hiderStartZ = -242;
 
   @type("number")
-  seekerStartX = 12;
+  seekerStartX = 296.6;
 
   @type("number")
-  seekerStartY = 0;
+  seekerStartY = 1.81;
 
   @type("number")
-  seekerStartZ = 12;
+  seekerStartZ = -222;
 
   @type("number")
-  lobbySpawnX = 0;
+  lobbySpawnX = 276.6;
 
   @type("number")
-  lobbySpawnY = 0;
+  lobbySpawnY = 1.81;
 
   @type("number")
-  lobbySpawnZ = 0;
+  lobbySpawnZ = -222;
 }

@@ -542,6 +542,15 @@ ArcadeNetworkClient.prototype.sendManhuntTagRequest = function () {
   return true;
 };
 
+ArcadeNetworkClient.prototype.sendPlayerPositionCapture = function (payload) {
+  if (!this.room || !this.room.send) {
+    return false;
+  }
+
+  this.room.send("debug:playerPositionCapture", payload || {});
+  return true;
+};
+
 ArcadeNetworkClient.prototype.onManhuntEvent = function (callback) {
   this.onEvent("manhuntEvent", callback);
 };
