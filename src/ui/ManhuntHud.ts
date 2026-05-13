@@ -8,6 +8,7 @@ export class ManhuntHud {
   private readonly countsLine: HTMLDivElement;
   private readonly messageLine: HTMLDivElement;
   private readonly resultsLine: HTMLDivElement;
+  private readonly debugSection: HTMLDivElement;
 
   public constructor(container: HTMLElement) {
     this.root = document.createElement('div');
@@ -40,8 +41,15 @@ export class ManhuntHud {
     this.resultsLine = this.createLine();
     this.resultsLine.style.whiteSpace = 'pre-line';
     this.resultsLine.style.marginTop = '8px';
+    this.debugSection = this.createLine();
+    this.debugSection.style.whiteSpace = 'pre-line';
+    this.debugSection.style.marginTop = '10px';
+    this.debugSection.style.paddingTop = '8px';
+    this.debugSection.style.borderTop = '1px solid rgba(255, 255, 255, 0.22)';
+    this.debugSection.style.fontFamily = 'ui-monospace, SFMono-Regular, Consolas, monospace';
+    this.debugSection.style.fontSize = '12px';
 
-    this.root.append(this.stateLine, this.teamLine, this.timerLine, this.countsLine, this.messageLine, this.resultsLine);
+    this.root.append(this.stateLine, this.teamLine, this.timerLine, this.countsLine, this.messageLine, this.resultsLine, this.debugSection);
     container.appendChild(this.root);
   }
 
@@ -52,6 +60,8 @@ export class ManhuntHud {
     this.countsLine.textContent = `Hiders: ${snapshot.hidersSafe}/${snapshot.hiderTotal} safe · ${snapshot.hidersTagged}/${snapshot.hiderTotal} tagged`;
     this.messageLine.textContent = snapshot.message;
 
+    this.updateDebugSection(snapshot);
+
     if (snapshot.state === 'roundOver' && snapshot.results.length > 0) {
       const lines = snapshot.results
         .slice()
@@ -61,6 +71,48 @@ export class ManhuntHud {
     } else {
       this.resultsLine.textContent = 'Controls: M start/reset · E tag/interact · Shift sprint · Space jump';
     }
+  }
+
+
+  private updateDebugSection(snapshot: ManhuntRoundSnapshot): void {
+    const debug = snapshot.debug;
+    this.debugSection.style.display = debug.showDebugInfo ? 'block' : 'none';
+    if (!debug.showDebugInfo) {
+      this.debugSection.textContent = '';
+      return;
+    }
+
+    this.debugSection.textContent = [
+      '[ManhuntDebug] TEMP start validation',
+      `LocalPlayer: ${this.formatVector(debug.localPlayerPosition)}`,
+      `SafeZone entity: ${this.formatVector(debug.safeZonePosition)}`,
+      `Client distanceXZ: ${this.formatNumber(debug.clientDistanceXZ)}`,
+      `Client safeZoneRadius: ${this.formatNumber(debug.clientSafeZoneRadius)}`,
+      `Server Home Base: ${this.formatHomeBase(debug.serverHomeBase)}`,
+      `Server local player: ${this.formatVector(debug.serverKnownLocalPlayer)}`,
+      `Local - server diff: ${this.formatVector(debug.localVsServerDelta)}`,
+      `Last server feedback: ${debug.lastServerFeedbackMessage || '(none)'}`
+    ].join('\n');
+  }
+
+  private formatVector(vector: { x: number; y: number; z: number } | null): string {
+    if (!vector) {
+      return '(unavailable)';
+    }
+
+    return `x=${this.formatNumber(vector.x)} y=${this.formatNumber(vector.y)} z=${this.formatNumber(vector.z)}`;
+  }
+
+  private formatHomeBase(homeBase: { x: number; y: number; z: number; radius: number } | null): string {
+    if (!homeBase) {
+      return '(unavailable)';
+    }
+
+    return `${this.formatVector(homeBase)} r=${this.formatNumber(homeBase.radius)}`;
+  }
+
+  private formatNumber(value: number | null): string {
+    return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '(unavailable)';
   }
 
   private createLine(): HTMLDivElement {

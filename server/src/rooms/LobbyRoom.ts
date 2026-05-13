@@ -23,6 +23,16 @@ type ManhuntPhase = "lobby" | "countdown" | "hidingPhase" | "seekingPhase" | "ro
 type ManhuntTeam = "none" | "hider" | "seeker";
 type ManhuntStatus = "none" | "active" | "safe" | "tagged";
 
+type ManhuntStartDebugMessage = {
+  localPlayer?: Vec3 | null;
+  safeZoneEntity?: Vec3 | null;
+  clientDistanceXZ?: number | null;
+  clientSafeZoneRadius?: number | null;
+  serverSafeZone?: (Vec3 & { radius: number }) | null;
+  localSessionId?: string;
+  localDisplayName?: string;
+};
+
 const DEFAULT_COLOR = "#44aaff";
 const DEFAULT_HAT_ID = "No Hat";
 const SAFE_HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
@@ -118,6 +128,13 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
 
     this.onMessage("manhunt:startRequest", (client) => {
       this.handleManhuntStartRequest(client);
+    });
+
+    this.onMessage("debug:manhuntStartAttempt", (client, message: ManhuntStartDebugMessage) => {
+      console.log(
+        `[ManhuntDebug] debug:manhuntStartAttempt from ${this.playerLabel(client.sessionId)} ` +
+          JSON.stringify(message, null, 2),
+      );
     });
 
     this.onMessage("manhunt:tagRequest", (client) => {
@@ -245,12 +262,13 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     const fullDistance = distance(requesterPosition, safeZone);
     const xzDistance = distanceXZ(requesterPosition, safeZone);
     const radius = this.state.manhunt.safeZoneRadius;
+    const isInsideHomeBase = xzDistance <= radius;
 
     console.log(
-      `[Manhunt] Home Base check: requester=${requester.name} (${client.sessionId}), ` +
-        `position=(${requesterPosition.x}, ${requesterPosition.y}, ${requesterPosition.z}), ` +
-        `safeZone=(${safeZone.x}, ${safeZone.y}, ${safeZone.z}), radius=${radius}, ` +
-        `distance=${fullDistance.toFixed(2)}, distanceXZ=${xzDistance.toFixed(2)}`,
+      `[ManhuntDebug] Home Base start validation: requester=${requester.name} (${client.sessionId}), ` +
+        `serverKnownPlayerPosition=(${requesterPosition.x}, ${requesterPosition.y}, ${requesterPosition.z}), ` +
+        `serverHomeBase=(${safeZone.x}, ${safeZone.y}, ${safeZone.z}), radius=${radius}, ` +
+        `distance=${fullDistance.toFixed(2)}, distanceXZ=${xzDistance.toFixed(2)}, inside=${isInsideHomeBase}`,
     );
 
     if (!this.isPlayerInSafeZone(requester)) {

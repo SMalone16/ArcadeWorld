@@ -78,6 +78,7 @@ export class ArcadeGame {
 
       const keyboard = this.app.keyboard;
       if (keyboard?.wasPressed(KEY_M)) {
+        this.manhuntRoundManager.sendStartAttemptDebug();
         const snapshot = this.manhuntRoundManager.getSnapshot();
         if (snapshot.state === 'roundOver') {
           this.manhuntRoundManager.resetToLobby();
