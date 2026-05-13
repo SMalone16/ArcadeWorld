@@ -48,13 +48,11 @@ const ALLOWED_HAT_IDS = new Set(["No Hat", "Top Hat", "Western"]);
 // These Manhunt coordinates are server-authoritative PlayCanvas world-space marker positions.
 // Keep the matching PlayCanvas marker/collider entities in sync with these values.
 const MANHUNT_HOME_BASE: Vec3 = { x: 276.6, y: -0.19, z: -222 };
-const MANHUNT_HIDER_START: Vec3 = { x: 276.6, y: -0.19, z: -242 };
-const MANHUNT_SEEKER_START: Vec3 = { x: 296.6, y: -0.19, z: -222 };
-const MANHUNT_LOBBY_SPAWN: Vec3 = { x: 276.6, y: -0.19, z: -222 };
 const MANHUNT_SAFE_ZONE_RADIUS = 15;
-// Temporary lift until exact PlayCanvas LocalPlayer root-height spawn markers are captured.
-// Do not spawn roots exactly on or below the visible floor surface.
-const SPAWN_VERTICAL_SAFETY_OFFSET = 2;
+// Player roots spawn slightly above the visual Home Base ground height so they do not fall through the floor.
+const MANHUNT_SEEKER_START: Vec3 = { x: MANHUNT_HOME_BASE.x, y: 0.5, z: MANHUNT_HOME_BASE.z };
+const MANHUNT_HIDER_START: Vec3 = { x: 285, y: 0.5, z: -88 };
+const MANHUNT_LOBBY_SPAWN: Vec3 = { x: MANHUNT_HOME_BASE.x, y: 0.5, z: MANHUNT_HOME_BASE.z };
 
 const MANHUNT_COUNTDOWN_SECONDS = 5;
 const MANHUNT_HIDING_SECONDS = 10;
@@ -101,9 +99,6 @@ function distanceXZ(a: Vec3, b: Vec3): number {
   return Math.sqrt(dx * dx + dz * dz);
 }
 
-function applySpawnVerticalSafety(position: Vec3): Vec3 {
-  return { x: position.x, y: position.y + SPAWN_VERTICAL_SAFETY_OFFSET, z: position.z };
-}
 
 function formatVec3(position: Vec3): string {
   return `(${position.x}, ${position.y}, ${position.z})`;
@@ -121,13 +116,13 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
       `[Manhunt] Home Base configured at (${MANHUNT_HOME_BASE.x}, ${MANHUNT_HOME_BASE.y}, ${MANHUNT_HOME_BASE.z}), radius ${MANHUNT_SAFE_ZONE_RADIUS}`,
     );
     console.log(
-      `[Manhunt] HiderStart configured at ${formatVec3(applySpawnVerticalSafety(MANHUNT_HIDER_START))}`,
+      `[Manhunt] HiderStart configured at ${formatVec3(MANHUNT_HIDER_START)}`,
     );
     console.log(
-      `[Manhunt] SeekerStart configured at ${formatVec3(applySpawnVerticalSafety(MANHUNT_SEEKER_START))}`,
+      `[Manhunt] SeekerStart configured at ${formatVec3(MANHUNT_SEEKER_START)}`,
     );
     console.log(
-      `[Manhunt] LobbySpawn configured at ${formatVec3(applySpawnVerticalSafety(MANHUNT_LOBBY_SPAWN))}`,
+      `[Manhunt] LobbySpawn configured at ${formatVec3(MANHUNT_LOBBY_SPAWN)}`,
     );
   }
 
@@ -248,9 +243,9 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     manhunt.safeZoneY = MANHUNT_HOME_BASE.y;
     manhunt.safeZoneZ = MANHUNT_HOME_BASE.z;
     manhunt.safeZoneRadius = MANHUNT_SAFE_ZONE_RADIUS;
-    const hiderStart = applySpawnVerticalSafety(MANHUNT_HIDER_START);
-    const seekerStart = applySpawnVerticalSafety(MANHUNT_SEEKER_START);
-    const lobbySpawn = applySpawnVerticalSafety(MANHUNT_LOBBY_SPAWN);
+    const hiderStart = MANHUNT_HIDER_START;
+    const seekerStart = MANHUNT_SEEKER_START;
+    const lobbySpawn = MANHUNT_LOBBY_SPAWN;
     manhunt.hiderStartX = hiderStart.x;
     manhunt.hiderStartY = hiderStart.y;
     manhunt.hiderStartZ = hiderStart.z;
@@ -325,7 +320,7 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     this.state.manhunt.startedBy = startedBy;
     this.state.manhunt.phase = "countdown";
     this.state.manhunt.timerSeconds = MANHUNT_COUNTDOWN_SECONDS;
-    this.state.manhunt.message = "Teams assigned. Hiders, get ready to hide and sneak home.";
+    this.state.manhunt.message = "Teams assigned. Hiders, stay out of sight and sneak back to Home Base.";
 
     for (const [sessionId, player] of sorted) {
       const team: ManhuntTeam = sessionId === seekerId ? "seeker" : "hider";
@@ -369,12 +364,12 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     }
 
     if (phase === "countdown") {
-      this.setManhuntPhase("hidingPhase", MANHUNT_HIDING_SECONDS, "Hiders: stay out of sight and sneak back to Home Base.");
+      this.setManhuntPhase("hidingPhase", MANHUNT_HIDING_SECONDS, "Hiders: Stay out of sight. Sneak back to Home Base.");
       return;
     }
 
     if (phase === "hidingPhase") {
-      this.setManhuntPhase("seekingPhase", MANHUNT_SEEKING_SECONDS, "Seekers released! Find hiders and tag them with E.");
+      this.setManhuntPhase("seekingPhase", MANHUNT_SEEKING_SECONDS, "Seekers released! Protect Home Base. Watch for hiders and tag them with E.");
       return;
     }
 

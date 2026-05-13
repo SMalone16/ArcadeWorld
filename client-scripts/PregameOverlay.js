@@ -12,6 +12,7 @@ PregameOverlay.prototype.initialize = function () {
   this._hatIds = ["No Hat", "Top Hat", "Western"];
   this._colorChoices = ["#44aaff", "#ffcc66", "#88dd77", "#ff88bb", "#aa99ff"];
   this._profile = this._loadProfile();
+  this._colorButtons = [];
   this._setGameState("onboarding");
   this._releasePointerLock();
   this._root = this._createRootElement();
@@ -65,7 +66,14 @@ PregameOverlay.prototype._createRootElement = function () {
 };
 
 PregameOverlay.prototype._render = function () {
+  // Color and hat controls may refresh this panel while the name is still unsaved.
+  // Always pull typed form values into _profile before rebuilding DOM so they are not lost.
+  if (this._nameInput || this._colorInput || this._hatSelect) {
+    this._updateProfileFromForm();
+  }
+
   this._root.innerHTML = "";
+  this._colorButtons = [];
 
   var panel = document.createElement("div");
   panel.style.width = "min(440px, 100%)";
@@ -93,6 +101,8 @@ PregameOverlay.prototype._render = function () {
   this._nameInput.maxLength = 24;
   this._nameInput.value = this._profile.name;
   this._styleInput(this._nameInput);
+  this._nameInput.addEventListener("input", this._updateProfileFromForm.bind(this));
+  this._nameInput.addEventListener("change", this._updateProfileFromForm.bind(this));
   panel.appendChild(nameLabel);
   panel.appendChild(this._nameInput);
 
@@ -114,6 +124,14 @@ PregameOverlay.prototype._render = function () {
   this._colorInput.style.border = "1px solid rgba(255, 255, 255, 0.35)";
   this._colorInput.style.borderRadius = "8px";
   this._colorInput.style.background = "transparent";
+  this._colorInput.addEventListener("input", function () {
+    this._updateProfileFromForm();
+    this._refreshColorButtonSelection();
+  }.bind(this));
+  this._colorInput.addEventListener("change", function () {
+    this._updateProfileFromForm();
+    this._refreshColorButtonSelection();
+  }.bind(this));
   colorRow.appendChild(this._colorInput);
   panel.appendChild(colorRow);
 
@@ -127,6 +145,7 @@ PregameOverlay.prototype._render = function () {
     this._hatSelect.appendChild(option);
   }
   this._hatSelect.value = this._profile.hatId;
+  this._hatSelect.addEventListener("change", this._updateProfileFromForm.bind(this));
   panel.appendChild(this._hatSelect);
 
   this._error = document.createElement("div");
@@ -179,17 +198,41 @@ PregameOverlay.prototype._createColorButton = function (color) {
   button.style.width = "38px";
   button.style.height = "38px";
   button.style.border = color === this._profile.color ? "3px solid #ffffff" : "1px solid rgba(255, 255, 255, 0.45)";
+  button.setAttribute("data-color", color);
   button.style.borderRadius = "999px";
   button.style.background = color;
   button.style.cursor = "pointer";
   button.addEventListener("click", function () {
+    // Preserve unsaved name/hat edits before applying the color choice.
+    this._updateProfileFromForm();
     this._profile.color = color;
     if (this._colorInput) {
       this._colorInput.value = color;
     }
-    this._render();
+    this._refreshColorButtonSelection();
   }.bind(this));
+  this._colorButtons.push(button);
   return button;
+};
+
+PregameOverlay.prototype._refreshColorButtonSelection = function () {
+  for (var i = 0; i < this._colorButtons.length; i++) {
+    var button = this._colorButtons[i];
+    var color = button.getAttribute("data-color");
+    button.style.border = color === this._profile.color ? "3px solid #ffffff" : "1px solid rgba(255, 255, 255, 0.45)";
+  }
+};
+
+PregameOverlay.prototype._readCurrentFormProfile = function () {
+  return this._sanitizeProfile({
+    name: this._nameInput ? this._nameInput.value : this._profile.name,
+    color: this._colorInput ? this._colorInput.value : this._profile.color,
+    hatId: this._hatSelect ? this._hatSelect.value : this._profile.hatId
+  });
+};
+
+PregameOverlay.prototype._updateProfileFromForm = function () {
+  this._profile = this._readCurrentFormProfile();
 };
 
 PregameOverlay.prototype._onPlay = async function (event) {
@@ -204,11 +247,7 @@ PregameOverlay.prototype._onPlay = async function (event) {
     return;
   }
 
-  var profile = this._sanitizeProfile({
-    name: this._nameInput ? this._nameInput.value : "",
-    color: this._colorInput.value,
-    hatId: this._hatSelect.value
-  });
+  var profile = this._readCurrentFormProfile();
 
   console.log("[PregameOverlay] Play clicked with profile", profile);
   this._saveProfile(profile);
