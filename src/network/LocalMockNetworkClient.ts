@@ -1,6 +1,7 @@
 import { AppBase, Color, Entity, Vec3 } from 'playcanvas';
 import { createPlayerPrefab } from '../entities/PlayerPrefab';
-import type { INetworkClient, NetworkJoinContext, SpawnTransform } from '../game/types';
+import { GAME_CONFIG } from '../game/config';
+import type { INetworkClient, ManhuntNetworkState, ManhuntStartDebugPayload, NetworkJoinContext, NetworkPlayerState, SpawnTransform } from '../game/types';
 
 interface MockClientState {
   id: string;
@@ -27,6 +28,7 @@ export class LocalMockNetworkClient implements INetworkClient {
   private boundApp: AppBase | null = null;
   private localClientId = '';
   private spawnJoinCounter = 0;
+  private lastManhuntFeedbackMessage = '';
 
   public async connect(): Promise<void> {
     console.log('[Network:Mock] connect');
@@ -98,6 +100,10 @@ export class LocalMockNetworkClient implements INetworkClient {
     });
   }
 
+  public sendManhuntStartDebug(payload: ManhuntStartDebugPayload): void {
+    console.log('[ManhuntDebug] mock debug:manhuntStartAttempt', payload);
+  }
+
   public onSnapshot(handler: (snapshot: unknown) => void): void {
     this.snapshotHandler = handler;
   }
@@ -108,6 +114,46 @@ export class LocalMockNetworkClient implements INetworkClient {
 
   public getPlayerIds(): string[] {
     return Array.from(this.clientPlayerMap.keys());
+  }
+
+  public getLocalSessionId(): string {
+    return this.localClientId;
+  }
+
+  public getManhuntState(): ManhuntNetworkState | null {
+    const players: Record<string, NetworkPlayerState> = {};
+
+    this.clientPlayerMap.forEach((entity, clientId) => {
+      const position = entity.getPosition();
+      const rotation = entity.getEulerAngles();
+      players[clientId] = {
+        id: clientId,
+        name: clientId,
+        x: position.x,
+        y: position.y,
+        z: position.z,
+        rotY: rotation.y
+      };
+    });
+
+    return {
+      phase: 'mock',
+      message: 'Local mock network: no server feedback yet.',
+      safeZoneX: GAME_CONFIG.manhunt.spawns.safeZone.x,
+      safeZoneY: GAME_CONFIG.manhunt.spawns.safeZone.y,
+      safeZoneZ: GAME_CONFIG.manhunt.spawns.safeZone.z,
+      safeZoneRadius: GAME_CONFIG.manhunt.safeZoneRadius,
+      players
+    };
+  }
+
+  public getServerKnownLocalPlayer(): NetworkPlayerState | null {
+    const localSessionId = this.getLocalSessionId();
+    return this.getManhuntState()?.players[localSessionId] ?? null;
+  }
+
+  public getLastManhuntFeedbackMessage(): string {
+    return this.lastManhuntFeedbackMessage;
   }
 
   public removeClient(clientId: string): void {

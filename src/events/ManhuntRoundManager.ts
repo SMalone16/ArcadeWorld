@@ -1,6 +1,6 @@
 import { KEY_E, Vec3 } from 'playcanvas';
 import { GAME_CONFIG } from '../game/config';
-import type { INetworkClient, SpawnTransform } from '../game/types';
+import type { INetworkClient, ManhuntStartDebugPayload, SpawnTransform, Vector3Like } from '../game/types';
 
 export type ManhuntRoundState = 'lobby' | 'countdown' | 'hidingPhase' | 'seekingPhase' | 'roundOver';
 export type ManhuntTeam = 'hider' | 'seeker';
@@ -13,6 +13,18 @@ export interface ManhuntPlayerState {
   roundPoints: number;
 }
 
+export interface ManhuntDebugSnapshot {
+  showDebugInfo: boolean;
+  localPlayerPosition: Vector3Like | null;
+  safeZonePosition: Vector3Like;
+  clientDistanceXZ: number | null;
+  clientSafeZoneRadius: number;
+  serverHomeBase: { x: number; y: number; z: number; radius: number } | null;
+  serverKnownLocalPlayer: Vector3Like | null;
+  localVsServerDelta: Vector3Like | null;
+  lastServerFeedbackMessage: string;
+}
+
 export interface ManhuntRoundSnapshot {
   state: ManhuntRoundState;
   localPlayer?: ManhuntPlayerState;
@@ -22,6 +34,7 @@ export interface ManhuntRoundSnapshot {
   hiderTotal: number;
   results: ManhuntPlayerState[];
   message: string;
+  debug: ManhuntDebugSnapshot;
 }
 
 interface ManhuntRoundManagerOptions {
@@ -47,6 +60,7 @@ export class ManhuntRoundManager {
   private results: ManhuntPlayerState[] = [];
   private message = 'Press M to start Manhunt.';
   private hasAwardedEndOfRoundPoints = false;
+  public showDebugInfo = true;
 
   public constructor(private readonly options: ManhuntRoundManagerOptions) {
   }
@@ -62,8 +76,14 @@ export class ManhuntRoundManager {
       hidersTagged: hiders.filter((player) => player.isTagged).length,
       hiderTotal: hiders.length,
       results: this.results.map((player) => ({ ...player })),
-      message: this.message
+      message: this.message,
+      debug: this.getDebugSnapshot()
     };
+  }
+
+  public sendStartAttemptDebug(): void {
+    const payload = this.createStartAttemptDebugPayload();
+    this.options.networkClient.sendManhuntStartDebug(payload);
   }
 
   public startRound(): void {
@@ -123,6 +143,70 @@ export class ManhuntRoundManager {
     this.results = [];
     this.hasAwardedEndOfRoundPoints = false;
     this.setState('lobby', 0, 'Press M to start Manhunt.');
+  }
+
+
+  private getDebugSnapshot(): ManhuntDebugSnapshot {
+    const localPosition = this.getLocalPlayerPosition();
+    const safeZonePosition = this.vectorToPlain(this.options.safeZoneCenter);
+    const serverState = this.options.networkClient.getManhuntState();
+    const serverKnownPlayer = this.options.networkClient.getServerKnownLocalPlayer();
+    const serverKnownPosition = serverKnownPlayer ? { x: serverKnownPlayer.x, y: serverKnownPlayer.y, z: serverKnownPlayer.z } : null;
+    const localVsServerDelta = localPosition && serverKnownPosition
+      ? {
+          x: localPosition.x - serverKnownPosition.x,
+          y: localPosition.y - serverKnownPosition.y,
+          z: localPosition.z - serverKnownPosition.z
+        }
+      : null;
+
+    return {
+      showDebugInfo: this.showDebugInfo,
+      localPlayerPosition: localPosition,
+      safeZonePosition,
+      clientDistanceXZ: localPosition ? this.distanceXZ(localPosition, safeZonePosition) : null,
+      clientSafeZoneRadius: this.options.safeZoneRadius,
+      serverHomeBase: serverState
+        ? {
+            x: serverState.safeZoneX,
+            y: serverState.safeZoneY,
+            z: serverState.safeZoneZ,
+            radius: serverState.safeZoneRadius
+          }
+        : null,
+      serverKnownLocalPlayer: serverKnownPosition,
+      localVsServerDelta,
+      lastServerFeedbackMessage: this.options.networkClient.getLastManhuntFeedbackMessage()
+    };
+  }
+
+  private createStartAttemptDebugPayload(): ManhuntStartDebugPayload {
+    const debug = this.getDebugSnapshot();
+    const localSessionId = this.options.networkClient.getLocalSessionId();
+    const serverKnownPlayer = this.options.networkClient.getServerKnownLocalPlayer();
+
+    return {
+      localPlayer: debug.localPlayerPosition,
+      safeZoneEntity: debug.safeZonePosition,
+      clientDistanceXZ: debug.clientDistanceXZ,
+      clientSafeZoneRadius: debug.clientSafeZoneRadius,
+      serverSafeZone: debug.serverHomeBase,
+      localSessionId,
+      localDisplayName: serverKnownPlayer?.name ?? localSessionId
+    };
+  }
+
+  private getLocalPlayerPosition(): Vector3Like | null {
+    const localPlayer = this.options.networkClient.getPlayerEntity(this.options.localClientId);
+    return localPlayer ? this.vectorToPlain(localPlayer.getPosition()) : null;
+  }
+
+  private vectorToPlain(vector: Vec3): Vector3Like {
+    return { x: vector.x, y: vector.y, z: vector.z };
+  }
+
+  private distanceXZ(a: Vector3Like, b: Vector3Like): number {
+    return Math.hypot(a.x - b.x, a.z - b.z);
   }
 
   private advanceStateFromTimer(): void {
