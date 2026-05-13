@@ -175,18 +175,21 @@ Manhunt is now a server-authoritative multiplayer game mode. The Colyseus room o
 - Clients send:
   - `manhunt:startRequest` when the player presses **M** at Home Base.
   - `manhunt:tagRequest` when a seeker presses **E** during the seeking phase.
+  - `debug:playerPositionCapture` when a player presses **P** to print the local player root position in the server terminal.
 - The server validates player count, Home Base distance, seeker/hider roles, tag distance, safe-zone entry, scoring, and round reset.
-- The server owns the real Home Base validation. It cannot read PlayCanvas scene entities or collision components, so it only trusts `LobbyRoom.ts` Manhunt coordinates and player positions received through movement packets.
+- The server owns the real Home Base validation and the real Manhunt spawn destinations. It cannot read PlayCanvas scene entities or collision components, so it only trusts `LobbyRoom.ts` Manhunt coordinates and player positions received through movement packets.
 
 ### Entities to create or update
 
 - `ManhuntSafeZone`
   - Add a visible flat cylinder/disc or transparent marker at the Home Base location.
-  - Match this visible marker to the server safe-zone coordinates in `server/src/rooms/LobbyRoom.ts` (`safeZoneX/Y/Z` and `safeZoneRadius`) until those values are promoted to a scene-config message. The current server Home Base is `x=276.6`, `y=-0.19`, `z=-222`, with radius `15`.
+  - Match this visible marker to the server safe-zone coordinates in `server/src/rooms/LobbyRoom.ts` (`MANHUNT_HOME_BASE` and `MANHUNT_SAFE_ZONE_RADIUS`). The current server Home Base is `x=276.6`, `y=-0.19`, `z=-222`, with radius `15`.
   - Keep the visible SafeZone entity coordinates in PlayCanvas synchronized with these server values whenever the scene marker moves.
 - Spawn transforms
-  - Hider, seeker, and lobby spawn positions are currently server-owned defaults in `LobbyRoom.ts`.
-  - Keep matching PlayCanvas editor markers named clearly (for example `HiderStart`, `SeekerStart`, `LobbySpawn`) so students can understand where server teleports will place players.
+  - Hider, seeker, and lobby spawn positions are server-authoritative constants in `server/src/rooms/LobbyRoom.ts`: `MANHUNT_HIDER_START`, `MANHUNT_SEEKER_START`, and `MANHUNT_LOBBY_SPAWN`. These must match the PlayCanvas world positions of the visible editor markers named `HiderStart`, `SeekerStart`, and `LobbySpawn`.
+  - The PlayCanvas marker/collider entities are useful for local prompts and for students to see the setup, but they are not final server authority. Best practice for now is: PlayCanvas marker/collider = visual/local prompt, server constants/config = authoritative interaction/spawn truth, and both must be kept in sync.
+  - If players fall through the floor after a server teleport, the spawn root is probably at or below the floor surface, or the marker is over scenery without a collision/static rigidbody. Move the marker to a walkable collision surface and capture the LocalPlayer root Y while standing there.
+  - `LobbyRoom.ts` currently applies a temporary `SPAWN_VERTICAL_SAFETY_OFFSET` to Manhunt spawns so player roots do not appear exactly on the visible floor. Replace that temporary lift with exact root-height marker coordinates after capture.
 - Player prefab/local player
   - Keep the root entity at scale `1,1,1` for gameplay/physics.
   - Put body visuals under a child named `AvatarVisual` or `Visual`.
@@ -197,5 +200,6 @@ Manhunt is now a server-authoritative multiplayer game mode. The Colyseus room o
 - Gather at Home Base / the safe zone, then press **M** to request a server-authoritative Manhunt round.
 - Pressing **M** outside Home Base shows "Go to Home Base to start Manhunt" locally, and the server also rejects invalid starts.
 - Press **E** as the seeker during the seeking phase to ask the server to tag the nearest active hider within range.
+- Press **P** while standing at an intended Manhunt marker to capture the local player root position. The client sends `debug:playerPositionCapture`, and the server logs `[ManhuntDebug] Position capture from ...: x, y, z`. Copy those values from the Codespace terminal into `MANHUNT_HIDER_START`, `MANHUNT_SEEKER_START`, or `MANHUNT_LOBBY_SPAWN` in `server/src/rooms/LobbyRoom.ts`.
 - Press **Shift** to sprint.
 - Press **Space** to jump.

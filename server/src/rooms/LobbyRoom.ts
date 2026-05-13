@@ -33,16 +33,28 @@ type ManhuntStartDebugMessage = {
   localDisplayName?: string;
 };
 
+type PlayerPositionCaptureMessage = {
+  position?: Vec3 | null;
+  label?: string;
+  localSessionId?: string;
+  localDisplayName?: string;
+};
+
 const DEFAULT_COLOR = "#44aaff";
 const DEFAULT_HAT_ID = "No Hat";
 const SAFE_HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 const ALLOWED_HAT_IDS = new Set(["No Hat", "Top Hat", "Western"]);
 
+// These Manhunt coordinates are server-authoritative PlayCanvas world-space marker positions.
+// Keep the matching PlayCanvas marker/collider entities in sync with these values.
 const MANHUNT_HOME_BASE: Vec3 = { x: 276.6, y: -0.19, z: -222 };
+const MANHUNT_HIDER_START: Vec3 = { x: 276.6, y: -0.19, z: -242 };
+const MANHUNT_SEEKER_START: Vec3 = { x: 296.6, y: -0.19, z: -222 };
+const MANHUNT_LOBBY_SPAWN: Vec3 = { x: 276.6, y: -0.19, z: -222 };
 const MANHUNT_SAFE_ZONE_RADIUS = 15;
-const MANHUNT_HIDER_START: Vec3 = { x: -12, y: 0, z: -12 };
-const MANHUNT_SEEKER_START: Vec3 = { x: 12, y: 0, z: 12 };
-const MANHUNT_LOBBY_SPAWN: Vec3 = { x: 0, y: 0, z: 0 };
+// Temporary lift until exact PlayCanvas LocalPlayer root-height spawn markers are captured.
+// Do not spawn roots exactly on or below the visible floor surface.
+const SPAWN_VERTICAL_SAFETY_OFFSET = 2;
 
 const MANHUNT_COUNTDOWN_SECONDS = 5;
 const MANHUNT_HIDING_SECONDS = 10;
@@ -89,6 +101,14 @@ function distanceXZ(a: Vec3, b: Vec3): number {
   return Math.sqrt(dx * dx + dz * dz);
 }
 
+function applySpawnVerticalSafety(position: Vec3): Vec3 {
+  return { x: position.x, y: position.y + SPAWN_VERTICAL_SAFETY_OFFSET, z: position.z };
+}
+
+function formatVec3(position: Vec3): string {
+  return `(${position.x}, ${position.y}, ${position.z})`;
+}
+
 /**
  * Single shared room for today's vertical slice.
  * Room name: arcade_lobby
@@ -101,13 +121,13 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
       `[Manhunt] Home Base configured at (${MANHUNT_HOME_BASE.x}, ${MANHUNT_HOME_BASE.y}, ${MANHUNT_HOME_BASE.z}), radius ${MANHUNT_SAFE_ZONE_RADIUS}`,
     );
     console.log(
-      `[Manhunt] HiderStart configured at (${MANHUNT_HIDER_START.x}, ${MANHUNT_HIDER_START.y}, ${MANHUNT_HIDER_START.z})`,
+      `[Manhunt] HiderStart configured at ${formatVec3(applySpawnVerticalSafety(MANHUNT_HIDER_START))}`,
     );
     console.log(
-      `[Manhunt] SeekerStart configured at (${MANHUNT_SEEKER_START.x}, ${MANHUNT_SEEKER_START.y}, ${MANHUNT_SEEKER_START.z})`,
+      `[Manhunt] SeekerStart configured at ${formatVec3(applySpawnVerticalSafety(MANHUNT_SEEKER_START))}`,
     );
     console.log(
-      `[Manhunt] LobbySpawn configured at (${MANHUNT_LOBBY_SPAWN.x}, ${MANHUNT_LOBBY_SPAWN.y}, ${MANHUNT_LOBBY_SPAWN.z})`,
+      `[Manhunt] LobbySpawn configured at ${formatVec3(applySpawnVerticalSafety(MANHUNT_LOBBY_SPAWN))}`,
     );
   }
 
@@ -135,6 +155,10 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
         `[ManhuntDebug] debug:manhuntStartAttempt from ${this.playerLabel(client.sessionId)} ` +
           JSON.stringify(message, null, 2),
       );
+    });
+
+    this.onMessage("debug:playerPositionCapture", (client, message: PlayerPositionCaptureMessage) => {
+      this.logPlayerPositionCapture(client, message);
     });
 
     this.onMessage("manhunt:tagRequest", (client) => {
@@ -224,15 +248,18 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     manhunt.safeZoneY = MANHUNT_HOME_BASE.y;
     manhunt.safeZoneZ = MANHUNT_HOME_BASE.z;
     manhunt.safeZoneRadius = MANHUNT_SAFE_ZONE_RADIUS;
-    manhunt.hiderStartX = MANHUNT_HIDER_START.x;
-    manhunt.hiderStartY = MANHUNT_HIDER_START.y;
-    manhunt.hiderStartZ = MANHUNT_HIDER_START.z;
-    manhunt.seekerStartX = MANHUNT_SEEKER_START.x;
-    manhunt.seekerStartY = MANHUNT_SEEKER_START.y;
-    manhunt.seekerStartZ = MANHUNT_SEEKER_START.z;
-    manhunt.lobbySpawnX = MANHUNT_LOBBY_SPAWN.x;
-    manhunt.lobbySpawnY = MANHUNT_LOBBY_SPAWN.y;
-    manhunt.lobbySpawnZ = MANHUNT_LOBBY_SPAWN.z;
+    const hiderStart = applySpawnVerticalSafety(MANHUNT_HIDER_START);
+    const seekerStart = applySpawnVerticalSafety(MANHUNT_SEEKER_START);
+    const lobbySpawn = applySpawnVerticalSafety(MANHUNT_LOBBY_SPAWN);
+    manhunt.hiderStartX = hiderStart.x;
+    manhunt.hiderStartY = hiderStart.y;
+    manhunt.hiderStartZ = hiderStart.z;
+    manhunt.seekerStartX = seekerStart.x;
+    manhunt.seekerStartY = seekerStart.y;
+    manhunt.seekerStartZ = seekerStart.z;
+    manhunt.lobbySpawnX = lobbySpawn.x;
+    manhunt.lobbySpawnY = lobbySpawn.y;
+    manhunt.lobbySpawnZ = lobbySpawn.z;
 
     this.logManhuntConfig();
   }
@@ -298,7 +325,7 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     this.state.manhunt.startedBy = startedBy;
     this.state.manhunt.phase = "countdown";
     this.state.manhunt.timerSeconds = MANHUNT_COUNTDOWN_SECONDS;
-    this.state.manhunt.message = "Teams assigned. Round starts soon!";
+    this.state.manhunt.message = "Teams assigned. Hiders, get ready to hide and sneak home.";
 
     for (const [sessionId, player] of sorted) {
       const team: ManhuntTeam = sessionId === seekerId ? "seeker" : "hider";
@@ -306,8 +333,11 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
       player.manhuntStatus = "active";
       player.manhuntPoints = 0;
       player.isInManhuntRound = true;
-      this.teleportPlayer(player, team === "seeker" ? this.getSeekerStart() : this.getHiderStart());
+      const spawnName = team === "seeker" ? "SeekerStart" : "HiderStart";
+      const spawn = team === "seeker" ? this.getSeekerStart() : this.getHiderStart();
+      this.teleportPlayer(player, spawn);
       console.log(`[Manhunt] team assignment: ${this.playerLabel(sessionId)} -> ${team}`);
+      console.log(`[ManhuntDebug] teleporting ${player.name} (${sessionId.slice(0, 4)}) as ${team} to ${spawnName} ${formatVec3(spawn)}`);
     }
 
     console.log(`[Manhunt] phase changed -> countdown (${MANHUNT_COUNTDOWN_SECONDS}s), seeker=${this.playerLabel(seekerId)}`);
@@ -339,12 +369,12 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     }
 
     if (phase === "countdown") {
-      this.setManhuntPhase("hidingPhase", MANHUNT_HIDING_SECONDS, "Hiders, run to Home Base!");
+      this.setManhuntPhase("hidingPhase", MANHUNT_HIDING_SECONDS, "Hiders: stay out of sight and sneak back to Home Base.");
       return;
     }
 
     if (phase === "hidingPhase") {
-      this.setManhuntPhase("seekingPhase", MANHUNT_SEEKING_SECONDS, "Seekers released! Tag hiders.");
+      this.setManhuntPhase("seekingPhase", MANHUNT_SEEKING_SECONDS, "Seekers released! Find hiders and tag them with E.");
       return;
     }
 
@@ -502,12 +532,25 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     const seekerStart = this.getSeekerStart();
     const lobbySpawn = this.getLobbySpawn();
 
+    console.log(`[Manhunt] Home Base configured at ${formatVec3(safeZone)}, radius ${this.state.manhunt.safeZoneRadius}`);
+    console.log(`[Manhunt] HiderStart configured at ${formatVec3(hiderStart)}`);
+    console.log(`[Manhunt] SeekerStart configured at ${formatVec3(seekerStart)}`);
+    console.log(`[Manhunt] LobbySpawn configured at ${formatVec3(lobbySpawn)}`);
+  }
+
+  private logPlayerPositionCapture(client: Client, message: PlayerPositionCaptureMessage): void {
+    const position = message?.position;
+    if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y) || !Number.isFinite(position.z)) {
+      console.log(`[ManhuntDebug] Position capture from ${this.playerLabel(client.sessionId)} ignored: invalid payload`);
+      return;
+    }
+
+    const label = sanitizeName(message.label, "standing at current position");
+    const displayName = sanitizeName(message.localDisplayName, this.state.players.get(client.sessionId)?.name ?? "Player");
     console.log(
-      `[Manhunt] Home Base configured at (${safeZone.x}, ${safeZone.y}, ${safeZone.z}), radius ${this.state.manhunt.safeZoneRadius}`,
+      `[ManhuntDebug] Position capture from ${displayName} (${client.sessionId.slice(0, 4)}): ` +
+        `${position.x}, ${position.y}, ${position.z} label=${label}`,
     );
-    console.log(`[Manhunt] HiderStart configured at (${hiderStart.x}, ${hiderStart.y}, ${hiderStart.z})`);
-    console.log(`[Manhunt] SeekerStart configured at (${seekerStart.x}, ${seekerStart.y}, ${seekerStart.z})`);
-    console.log(`[Manhunt] LobbySpawn configured at (${lobbySpawn.x}, ${lobbySpawn.y}, ${lobbySpawn.z})`);
   }
 
   private areAllHidersResolved(): boolean {

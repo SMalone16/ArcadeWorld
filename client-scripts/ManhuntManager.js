@@ -29,6 +29,7 @@ ManhuntManager.prototype.initialize = function () {
 ManhuntManager.prototype.update = function (dt) {
   this._checkStartInput();
   this._checkTagInput();
+  this._checkPositionCaptureInput();
 
   if (this._feedbackTimeRemaining > 0) {
     this._feedbackTimeRemaining = Math.max(0, this._feedbackTimeRemaining - dt);
@@ -141,6 +142,36 @@ ManhuntManager.prototype._checkTagInput = function () {
 
   console.log("[Manhunt] sending authoritative tag request");
   this.networkClient.sendManhuntTagRequest();
+};
+
+ManhuntManager.prototype._checkPositionCaptureInput = function () {
+  if (!this.app.keyboard || !this.app.keyboard.wasPressed(pc.KEY_P)) {
+    return;
+  }
+
+  if (!this.networkClient || !this.networkClient.sendPlayerPositionCapture) {
+    this._showFeedback("Connect to the server to capture position.", 1.5);
+    return;
+  }
+
+  var local = this._getLocalPlayerEntity();
+  if (!local) {
+    this._showFeedback("Local player missing; position not captured.", 1.5);
+    return;
+  }
+
+  var pos = local.getPosition();
+  var profile = this.networkClient.getLocalPlayerProfile ? this.networkClient.getLocalPlayerProfile() : null;
+  var payload = {
+    position: { x: pos.x, y: pos.y, z: pos.z },
+    label: "standing at current position",
+    localSessionId: this.networkClient.getLocalPlayerId ? this.networkClient.getLocalPlayerId() : "",
+    localDisplayName: profile && profile.name ? profile.name : "Student"
+  };
+
+  console.log("[ManhuntDebug] sending position capture", payload);
+  this.networkClient.sendPlayerPositionCapture(payload);
+  this._showFeedback("Position captured in server terminal.", 1.5);
 };
 
 ManhuntManager.prototype._isLocalPlayerInSafeZone = function (snapshot) {
@@ -265,8 +296,8 @@ ManhuntManager.prototype._getCenterOverlayHtml = function () {
     var instruction = this._getObjectiveText(snapshot.state, local);
     var phaseLine = "";
     if (snapshot.state === "countdown") phaseLine = "Round starts in " + Math.max(1, snapshot.timerSeconds);
-    if (snapshot.state === "hidingPhase") phaseLine = isHider ? "RUN TO HOME BASE!" : "WAIT FOR RELEASE";
-    if (snapshot.state === "seekingPhase") phaseLine = isHider ? "RUN TO HOME BASE!" : "SEEKERS RELEASED!";
+    if (snapshot.state === "hidingPhase") phaseLine = isHider ? "STAY HIDDEN" : "WAIT FOR RELEASE";
+    if (snapshot.state === "seekingPhase") phaseLine = isHider ? "SNEAK HOME" : "SEEKERS RELEASED!";
 
     return "" +
       "<div style='font-size:48px;color:" + (isHider ? "#7CFF8A" : "#FF7A7A") + ";letter-spacing:1px;'>" + title + "</div>" +
@@ -302,15 +333,15 @@ ManhuntManager.prototype._getResultsHtml = function (snapshot) {
 ManhuntManager.prototype._getObjectiveText = function (state, local) {
   if (state === "lobby") return "Go to Home Base and press M to start Manhunt.";
   if (!local || local.manhuntTeam === "none") return "Wait for teams.";
-  if (state === "countdown") return local.manhuntTeam === "hider" ? "Get ready… reach Home Base without getting tagged." : "Get ready… you will tag hiders with E.";
-  if (state === "hidingPhase") return local.manhuntTeam === "hider" ? "Run to Home Base!" : "Wait for release.";
+  if (state === "countdown") return local.manhuntTeam === "hider" ? "Get ready. Stay hidden, use cover, and sneak back to Home Base." : "Get ready. Watch for movement and prepare to hunt.";
+  if (state === "hidingPhase") return local.manhuntTeam === "hider" ? "Stay out of sight. Sneak back to Home Base." : "Wait for release. Hiders are hiding and moving toward Home Base.";
   if (state === "seekingPhase") {
     if (local.manhuntTeam === "hider") {
-      if (local.manhuntStatus === "safe") return "You are safe at Home Base.";
-      if (local.manhuntStatus === "tagged") return "You were tagged. Cheer on the others!";
-      return "Reach Home Base without getting tagged.";
+      if (local.manhuntStatus === "safe") return "You made it Home. Stay safe and cheer on the others.";
+      if (local.manhuntStatus === "tagged") return "You were tagged. Cheer on the others.";
+      return "Avoid the seeker. Reach Home Base without getting tagged.";
     }
-    return "Tag hiders with E.";
+    return "Find hiders and press E to tag them.";
   }
   return "Read the results, then get ready for the next round.";
 };
