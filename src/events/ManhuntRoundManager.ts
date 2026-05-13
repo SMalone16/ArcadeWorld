@@ -116,7 +116,7 @@ export class ManhuntRoundManager {
     });
 
     this.teleportTeamsToStarts();
-    this.setState('countdown', GAME_CONFIG.manhunt.countdownSeconds, 'Manhunt starts soon! Hiders, get ready.');
+    this.setState('countdown', GAME_CONFIG.manhunt.countdownSeconds, 'Manhunt starts soon! Hiders, stay out of sight and sneak back to Home Base.');
   }
 
   public update(dt: number): void {
@@ -211,14 +211,14 @@ export class ManhuntRoundManager {
 
   private advanceStateFromTimer(): void {
     if (this.state === 'countdown') {
-      this.setState('hidingPhase', GAME_CONFIG.manhunt.hidingPhaseSeconds, 'Hiders released! Seekers wait for the head start.');
+      this.setState('hidingPhase', GAME_CONFIG.manhunt.hidingPhaseSeconds, 'Hiders: Stay out of sight. Sneak back to Home Base.');
       this.releaseHidersOnly();
       return;
     }
 
     if (this.state === 'hidingPhase') {
       this.roundElapsed = 0;
-      this.setState('seekingPhase', GAME_CONFIG.manhunt.seekingPhaseSeconds, 'Seekers released! Tag hiders with E.');
+      this.setState('seekingPhase', GAME_CONFIG.manhunt.seekingPhaseSeconds, 'Seekers released! Protect Home Base. Watch for hiders and tag them with E.');
       this.releaseSeekers();
       return;
     }

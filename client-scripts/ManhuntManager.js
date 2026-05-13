@@ -333,15 +333,15 @@ ManhuntManager.prototype._getResultsHtml = function (snapshot) {
 ManhuntManager.prototype._getObjectiveText = function (state, local) {
   if (state === "lobby") return "Go to Home Base and press M to start Manhunt.";
   if (!local || local.manhuntTeam === "none") return "Wait for teams.";
-  if (state === "countdown") return local.manhuntTeam === "hider" ? "Get ready. Stay hidden, use cover, and sneak back to Home Base." : "Get ready. Watch for movement and prepare to hunt.";
-  if (state === "hidingPhase") return local.manhuntTeam === "hider" ? "Stay out of sight. Sneak back to Home Base." : "Wait for release. Hiders are hiding and moving toward Home Base.";
+  if (state === "countdown") return local.manhuntTeam === "hider" ? "Get ready. Stay out of sight, use cover, and sneak back to Home Base." : "Get ready. Protect Home Base and watch for hiders.";
+  if (state === "hidingPhase") return local.manhuntTeam === "hider" ? "Stay out of sight. Sneak back to Home Base." : "Protect Home Base. Watch for hiders and tag them with E.";
   if (state === "seekingPhase") {
     if (local.manhuntTeam === "hider") {
       if (local.manhuntStatus === "safe") return "You made it Home. Stay safe and cheer on the others.";
       if (local.manhuntStatus === "tagged") return "You were tagged. Cheer on the others.";
-      return "Avoid the seeker. Reach Home Base without getting tagged.";
+      return "Avoid the seeker. Use cover. Reach Home Base without getting tagged.";
     }
-    return "Find hiders and press E to tag them.";
+    return "Protect Home Base. Watch for hiders and tag them with E.";
   }
   return "Read the results, then get ready for the next round.";
 };
