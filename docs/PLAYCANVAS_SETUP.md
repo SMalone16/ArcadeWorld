@@ -13,6 +13,7 @@ Upload/copy these files from repo folder `client-scripts/`:
 - `PregameOverlay.js`
 - `NetworkDebugOverlay.js`
 - `ManhuntManager.js`
+- `ManhuntMapConfig.js`
 
 ## 2) Add Colyseus client library in PlayCanvas
 
@@ -160,8 +161,10 @@ Manhunt uses a hybrid classroom-playtest model: local movement is client-authori
   - The client-side safe-zone check is only immediate feedback for pressing **M** outside Home Base; the server still enforces the real start restriction from server-tracked player positions.
   - The Manhunt UI is state-driven and renders separate layers: center overlay, bottom role badge, top-right task panel, top-center timer, scoreboard overlay, and spectator overlay.
   - The center overlay is intentionally short-lived: it appears for team reveal, spawn countdown, feedback, and round-over results, then disappears during the active round.
+- Attach `ManhuntMapConfig.js` to the same `GameModeManager` entity to send PlayCanvas marker positions to the server while the room is still in the Manhunt `lobby` phase.
+  - This is a dev/classroom bridge only. Production server-authoritative games should use a trusted shared map config file or server-loaded map data instead of trusting a client-sent config.
 - `ArcadeNetworkClient.js` listens to the server `manhunt` schema plus Manhunt feedback messages.
-  - It exposes `getManhuntState()`, `getLocalManhuntTeam()`, `getLocalManhuntStatus()`, `getPlayerManhuntTeam(sessionId)`, `getPlayerDisplayName(sessionId)`, `isManhuntActive()`, `sendManhuntStartRequest()`, and `sendManhuntTagRequest()` for UI and nameplate code.
+  - It exposes `getManhuntState()`, `getLocalManhuntTeam()`, `getLocalManhuntStatus()`, `getPlayerManhuntTeam(sessionId)`, `getPlayerDisplayName(sessionId)`, `isManhuntActive()`, `sendManhuntStartRequest()`, `sendManhuntTagRequest()`, and `sendManhuntMapConfig(config)` for UI, nameplate, and marker-config code.
   - It applies local player position changes only when the server increments `serverTeleportId`, so normal server movement echoes do not fight local physics.
   - Enable `showMovementDebug` temporarily to display local velocity/position, the server-known local position, local/server difference, teleport id, and remote interpolation distance in-game.
 - `RemotePlayerManager.js` keeps DOM nameplates, applies Manhunt visibility rules, and interpolates remote avatars toward their latest server targets. Large jumps or changed `serverTeleportId` snap immediately.
@@ -181,25 +184,59 @@ Manhunt uses a hybrid classroom-playtest model: local movement is client-authori
   - `manhunt:tagRequest` when a seeker presses **E** during `activeRound`.
   - `debug:playerPositionCapture` when a player presses **P** to print the local player root position in the server terminal.
 - The server validates player count, Home Base distance, seeker/hider roles, tag distance, safe-zone entry, scoring, movement locks, and round reset.
-- The server owns the real Home Base validation and the real Manhunt spawn destinations. It cannot read PlayCanvas scene entities or collision components, so it only trusts `LobbyRoom.ts` Manhunt coordinates and player positions received through movement packets.
+- The server owns the real Home Base validation and the real Manhunt spawn destinations. For dev/classroom playtests, `ManhuntMapConfig.js` can send editor marker positions before a round starts; if that bridge is disabled or no config arrives, the server falls back to its hardcoded defaults.
+
+### Manhunt Marker Setup
+
+This setup removes the old copy/paste loop for classroom playtests: you can move marker entities visually in the PlayCanvas Editor, and `ManhuntMapConfig.js` sends their world-space transforms to the Colyseus server before a round starts. The server stores those values in `state.manhunt` and uses them for authoritative spawn, Home Base, and safe-zone checks during gameplay.
+
+1. Create empty/non-rendered marker entities in PlayCanvas:
+   - `ManhuntSafeZone`
+   - `SeekerSpawn`
+   - `HiderSpawnA`
+   - `HiderSpawnB`
+   - `HiderSpawnC`
+   - `LobbySpawn`
+   - `SpectatorCamera` (optional camera/marker used by spectator mode)
+2. Add `ManhuntMapConfig.js` to your `GameModeManager` entity.
+3. In the Inspector, assign:
+   - `networkManagerEntity` to the entity running `ArcadeNetworkClient.js`.
+   - `safeZoneEntity` to `ManhuntSafeZone`.
+   - `seekerSpawnEntity` to `SeekerSpawn`.
+   - `hiderSpawnAEntity`, `hiderSpawnBEntity`, and `hiderSpawnCEntity` to the three hider markers.
+   - `lobbySpawnEntity` to `LobbySpawn`.
+   - `spectatorCameraEntity` to `SpectatorCamera` if you want its position/rotation included in the payload.
+4. Set `safeZoneRadius` to match the Home Base area you want players to stand in before pressing **M**.
+5. Leave `sendOnConnect=true` for normal playtests. The script waits for `ArcadeNetworkClient` to join the room, then sends:
+
+   ```js
+   room.send("manhunt:mapConfig", {
+     safeZone: { x, y, z, radius },
+     seekerStart: { x, y, z },
+     hiderStarts: [{ x, y, z }, { x, y, z }, { x, y, z }],
+     lobbySpawn: { x, y, z },
+     spectatorCamera: { x, y, z, rotX, rotY, rotZ } // optional
+   });
+   ```
+
+6. Press **O** during a playtest to resend/log the current marker config without restarting the server. Check the browser console and the server terminal for `[ManhuntMapConfig]` lines.
+7. Restart the server and reload clients after uploading updated script files to PlayCanvas.
+
+Production note: this client-sent bridge is intentionally convenient for development and classroom testing. A production server-authoritative game should load trusted map data on the server, or use a shared config file built into both client and server, instead of trusting arbitrary client coordinates.
 
 ### Entities to create or update
 
 - `ManhuntSafeZone`
-  - Add a visible flat cylinder/disc or transparent marker at the Home Base location.
-  - Match this visible marker to the server safe-zone coordinates in `server/src/rooms/LobbyRoom.ts` (`MANHUNT_HOME_BASE` and `MANHUNT_SAFE_ZONE_RADIUS`). The current server Home Base is `x=276.6`, `y=-0.19`, `z=-222`, with radius `15`.
-  - Keep the visible SafeZone entity coordinates in PlayCanvas synchronized with these server values whenever the scene marker moves.
+  - Add a visible flat cylinder/disc or transparent marker at the Home Base location if students need a visual target.
+  - Assign this entity to both `ManhuntManager.safeZoneEntity` for local prompts and `ManhuntMapConfig.safeZoneEntity` for the server map-config bridge.
 - `SpectatorCamera`
   - Create a camera entity named `SpectatorCamera` that looks at Home Base / SeekerStart.
   - Start it disabled in the Editor, then assign it to `ManhuntManager.spectatorCameraEntity`.
   - Assign the existing gameplay camera to `ManhuntManager.mainCameraEntity` so spectator mode can switch cameras cleanly for tagged/safe hiders and round-over results.
 - Spawn transforms
-  - Manhunt spawn positions are server-authoritative PlayCanvas world-space **player-root** coordinates in `server/src/rooms/LobbyRoom.ts`, not visual floor positions.
-  - Current hider starts are `HIDER_STARTS = [{ x: 285, y: 0.5, z: -88 }, { x: 295, y: 0.5, z: -88 }, { x: 275, y: 0.5, z: -88 }]`.
-  - Current seeker/home/lobby spawn is `SEEKER_START = { x: 276.6, y: 0.5, z: -222 }` and `LOBBY_SPAWN = { x: 276.6, y: 0.5, z: -222 }`.
-  - Create or update visible editor markers named `HiderStart1`, `HiderStart2`, `HiderStart3`, `SeekerStart`, and `LobbySpawn`, and keep their marker positions synchronized with the server constants whenever the scene layout changes.
-  - The PlayCanvas marker/collider entities are useful for local prompts and for students to see the setup, but they are not final server authority. Best practice for now is: PlayCanvas marker/collider = visual/local prompt, server constants/config = authoritative interaction/spawn truth, and both must be kept in sync.
-  - If players fall through the floor after a server teleport, the spawn root is probably at or below the floor surface, or the marker is over scenery without a collision/static rigidbody. Move the marker to a walkable collision surface and capture the LocalPlayer root Y while standing there.
+  - Manhunt spawn positions are server-authoritative PlayCanvas world-space **player-root** coordinates during a round. With `ManhuntMapConfig.js`, the server receives those coordinates from assigned marker entities while the phase is `lobby`; if no config arrives, it falls back to the hardcoded defaults in `server/src/rooms/LobbyRoom.ts` and `server/src/schema/ManhuntState.ts`.
+  - Create or update editor markers named `HiderSpawnA`, `HiderSpawnB`, `HiderSpawnC`, `SeekerSpawn`, and `LobbySpawn`, then assign them to `ManhuntMapConfig.js`.
+  - If players fall through the floor after a server teleport, the spawn root is probably at or below the floor surface, or the marker is over scenery without a collision/static rigidbody. Move the marker to a walkable collision surface and resend with **O**.
 - Player prefab/local player
   - Keep the root entity at scale `1,1,1` for gameplay/physics.
   - Put body visuals under a child named `AvatarVisual` or `Visual` so spectator mode can hide the local avatar without disabling the networking entity.
@@ -211,11 +248,12 @@ Manhunt uses a hybrid classroom-playtest model: local movement is client-authori
 - Pressing **M** outside Home Base shows "Go to Home Base to start Manhunt" locally, and the server also rejects invalid starts.
 - Press **E** as a seeker during `activeRound` to ask the server to tag the nearest active hider within range.
 - Press **F** to toggle the Manhunt scoreboard overlay. It also opens automatically during `roundOver`.
-- Press **P** while standing at an intended Manhunt marker to capture the local player root position. The client sends `debug:playerPositionCapture`, and the server logs `[ManhuntDebug] Position capture from ...: x, y, z`. Copy those values from the Codespace terminal into `HIDER_STARTS`, `SEEKER_START`, or `LOBBY_SPAWN` in `server/src/rooms/LobbyRoom.ts`.
+- Press **P** while standing at an intended Manhunt marker to capture the local player root position. The client sends `debug:playerPositionCapture`, and the server logs `[ManhuntDebug] Position capture from ...: x, y, z`. This is still useful for debugging player-root Y values.
+- Press **O** to resend/log `ManhuntMapConfig.js` marker positions while Manhunt is in the `lobby` phase.
 - Press **Shift** to sprint.
 - Press **Space** to jump.
 
 ### After this PR is merged
 
-- Re-upload the updated client scripts from `client-scripts/` into PlayCanvas, especially `ArcadeNetworkClient.js`, `LocalPlayerController.js`, `RemotePlayerManager.js`, and `ManhuntManager.js`.
+- Re-upload the updated client scripts from `client-scripts/` into PlayCanvas, especially `ArcadeNetworkClient.js`, `LocalPlayerController.js`, `RemotePlayerManager.js`, `ManhuntManager.js`, and `ManhuntMapConfig.js`.
 - Re-check the `ManhuntManager.js` script attributes in the Editor after upload because the new camera attributes must be assigned before the classroom playtest.
