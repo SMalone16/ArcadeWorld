@@ -1,4 +1,4 @@
-/* global pc, window */
+/* global pc, window, document */
 
 var LocalPlayerController = pc.createScript("localPlayerController");
 
@@ -10,6 +10,11 @@ LocalPlayerController.attributes.add("networkManagerEntity", {
 LocalPlayerController.attributes.add("cameraEntity", {
   type: "entity",
   title: "Camera Entity"
+});
+
+LocalPlayerController.attributes.add("visualRootEntity", {
+  type: "entity",
+  title: "Visual Root Entity"
 });
 
 LocalPlayerController.attributes.add("moveSpeed", {
@@ -96,6 +101,12 @@ LocalPlayerController.attributes.add("sendInterval", {
   title: "Network Send Interval"
 });
 
+LocalPlayerController.attributes.add("showMouseLookDebug", {
+  type: "boolean",
+  default: false,
+  title: "Show Mouse Look Debug"
+});
+
 LocalPlayerController.prototype.initialize = function () {
   this.networkClient = null;
   this.sendTimer = 0;
@@ -118,8 +129,9 @@ LocalPlayerController.prototype.initialize = function () {
   this._currentVelocity = new pc.Vec3();
   this._yawQuat = new pc.Quat();
   this._lastAppliedYawDegrees = null;
+  this._isModifyingRootRotation = false;
+  this._mouseLookDebugHud = null;
   this._groundRaycastFilterBound = this._isValidGroundHit.bind(this);
-  this._yawApplyDeadzoneDegrees = 0.05;
 
   this._onMouseMoveBound = this._onMouseMove.bind(this);
   this._onMouseDownBound = this._onMouseDown.bind(this);
@@ -139,7 +151,7 @@ LocalPlayerController.prototype.initialize = function () {
   this._resolveCameraEntity();
   this._validatePhysicsSetup();
 
-  this._applyBodyYaw();
+  this._applyVisualYaw();
   this._applyCameraTransform();
 
   if (this.app.mouse) {
@@ -228,6 +240,7 @@ LocalPlayerController.prototype._onDestroy = function () {
   this.app.off("arcade:stateChanged", this._onStateChangedBound, this);
   this.app.off("arcade:profileReady", this._onProfileReadyBound, this);
   this.app.off("arcade:startGame", this._onStartGameBound, this);
+  this._destroyMouseLookDebugHud();
 };
 
 LocalPlayerController.prototype._onStateChanged = function (state) {
@@ -327,7 +340,7 @@ LocalPlayerController.prototype.update = function (dt) {
     return;
   }
 
-  this._applyBodyYaw();
+  this._applyVisualYaw();
 
   this._updateGroundedState();
   this._updateMovementVelocity(dt);
@@ -336,8 +349,6 @@ LocalPlayerController.prototype.update = function (dt) {
   } else {
     this._updateJumpCharge(dt);
   }
-  this._applyCameraTransform();
-
   this.sendTimer += dt;
   if (this.sendTimer >= this.sendInterval) {
     this.sendTimer = 0;
@@ -540,7 +551,7 @@ LocalPlayerController.prototype._buildYawRelativeMove = function () {
 
   if (this._localMoveInput.lengthSq() === 0) return;
 
-  // Movement is based on body yaw only. Pitch stays on the camera child, so
+  // Movement follows mouse-look yaw directly. Pitch stays camera-only, so
   // looking up/down never makes the capsule climb or dive.
   var yawRadians = this.yawDegrees * pc.math.DEG_TO_RAD;
   var sinYaw = Math.sin(yawRadians);
@@ -558,19 +569,40 @@ LocalPlayerController.prototype._buildYawRelativeMove = function () {
   }
 };
 
-LocalPlayerController.prototype._applyBodyYaw = function () {
-  if (this._lastAppliedYawDegrees !== null && Math.abs(this._lastAppliedYawDegrees - this.yawDegrees) < this._yawApplyDeadzoneDegrees) {
+LocalPlayerController.prototype._applyVisualYaw = function () {
+  this._isModifyingRootRotation = false;
+
+  if (this._lastAppliedYawDegrees === this.yawDegrees) {
     return;
   }
 
   this._lastAppliedYawDegrees = this.yawDegrees;
-  // Avoid using rigidbody.teleport for normal mouse-look yaw updates. The capsule
-  // has angularFactor locked, so direct entity rotation is enough for movement
-  // direction/camera alignment and avoids physics correction jitter.
-  this.entity.setEulerAngles(0, this.yawDegrees, 0);
+
+  if (this.visualRootEntity) {
+    this.visualRootEntity.setEulerAngles(0, this.yawDegrees, 0);
+    return;
+  }
+
+  // Dynamic rigidbody roots are owned by the physics solver. Mouse-look yaw drives
+  // movement and camera direction directly, so keep the capsule upright and only
+  // rotate a separate visual child when one is assigned.
   if (this.entity.rigidbody && this.entity.rigidbody.type === pc.BODYTYPE_DYNAMIC) {
     this.entity.rigidbody.angularVelocity = pc.Vec3.ZERO;
+    return;
   }
+
+  this._isModifyingRootRotation = true;
+  this.entity.setEulerAngles(0, this.yawDegrees, 0);
+};
+
+LocalPlayerController.prototype.postUpdate = function (_dt) {
+  if (!this._isPlaying()) {
+    this._updateMouseLookDebugHud(false);
+    return;
+  }
+
+  this._applyCameraTransform();
+  this._updateMouseLookDebugHud(true);
 };
 
 LocalPlayerController.prototype.shouldLockMovementForManhunt = function () {
@@ -592,16 +624,68 @@ LocalPlayerController.prototype.shouldLockMovementForManhunt = function () {
 LocalPlayerController.prototype._applyCameraTransform = function () {
   if (!this.cameraEntity) return;
 
-  // Place camera at the player's eye height.
   this._cameraWorldPos.copy(this.entity.getPosition());
   this._cameraWorldPos.y += this.eyeHeight;
 
   this.cameraEntity.setPosition(this._cameraWorldPos);
-
-  // Drive the camera's full world rotation directly:
-  // yaw = left/right from parent body
-  // pitch = up/down from mouse Y
   this.cameraEntity.setEulerAngles(this.pitchDegrees, this.yawDegrees, 0);
+};
+
+LocalPlayerController.prototype._updateMouseLookDebugHud = function (shouldShow) {
+  if (!this.showMouseLookDebug || !shouldShow || typeof document === "undefined") {
+    this._destroyMouseLookDebugHud();
+    return;
+  }
+
+  if (!this._mouseLookDebugHud) {
+    this._mouseLookDebugHud = document.createElement("div");
+    this._mouseLookDebugHud.style.position = "fixed";
+    this._mouseLookDebugHud.style.left = "12px";
+    this._mouseLookDebugHud.style.bottom = "12px";
+    this._mouseLookDebugHud.style.zIndex = "9999";
+    this._mouseLookDebugHud.style.padding = "8px 10px";
+    this._mouseLookDebugHud.style.borderRadius = "6px";
+    this._mouseLookDebugHud.style.background = "rgba(0, 0, 0, 0.72)";
+    this._mouseLookDebugHud.style.color = "#e9f7ff";
+    this._mouseLookDebugHud.style.font = "12px/1.35 monospace";
+    this._mouseLookDebugHud.style.pointerEvents = "none";
+    this._mouseLookDebugHud.style.whiteSpace = "pre-line";
+    document.body.appendChild(this._mouseLookDebugHud);
+  }
+
+  var playerPos = this.entity.getPosition();
+  var cameraPos = this.cameraEntity ? this.cameraEntity.getPosition() : null;
+  var pointerLocked = this.app.mouse && pc.Mouse.isPointerLocked ? pc.Mouse.isPointerLocked() : false;
+
+  this._mouseLookDebugHud.textContent = [
+    "Mouse Look Debug",
+    "yaw: " + this.yawDegrees.toFixed(2),
+    "pitch: " + this.pitchDegrees.toFixed(2),
+    "pointer lock: " + (pointerLocked ? "yes" : "no"),
+    "root rotation modified: " + (this._isModifyingRootRotation ? "yes" : "no"),
+    "player pos: " + this._formatDebugVec3(playerPos),
+    "camera pos: " + this._formatDebugVec3(cameraPos),
+    "camera: " + (this.cameraEntity ? this.cameraEntity.name : "none")
+  ].join("\n");
+};
+
+LocalPlayerController.prototype._formatDebugVec3 = function (value) {
+  if (!value) {
+    return "none";
+  }
+
+  return value.x.toFixed(2) + ", " + value.y.toFixed(2) + ", " + value.z.toFixed(2);
+};
+
+LocalPlayerController.prototype._destroyMouseLookDebugHud = function () {
+  if (!this._mouseLookDebugHud) {
+    return;
+  }
+
+  if (this._mouseLookDebugHud.parentNode) {
+    this._mouseLookDebugHud.parentNode.removeChild(this._mouseLookDebugHud);
+  }
+  this._mouseLookDebugHud = null;
 };
 
 LocalPlayerController.prototype._sendMoveState = function () {
