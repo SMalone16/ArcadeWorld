@@ -72,6 +72,7 @@ RemotePlayerManager.prototype.initialize = function () {
 
 RemotePlayerManager.prototype.update = function (dt) {
   this._updateRemoteInterpolation(dt || 0);
+  this._updateRemoteManhuntVisibility();
   this._updateNameplates();
 };
 
@@ -206,6 +207,29 @@ RemotePlayerManager.prototype._updateRemoteInterpolation = function (dt) {
   }
 };
 
+RemotePlayerManager.prototype._updateRemoteManhuntVisibility = function () {
+  if (!this.networkClient || !this.networkClient.getManhuntState) {
+    return;
+  }
+
+  var manhunt = this.networkClient.getManhuntState();
+  var phase = manhunt ? manhunt.phase : "lobby";
+  for (var sessionId in this.remoteEntities) {
+    if (!Object.prototype.hasOwnProperty.call(this.remoteEntities, sessionId)) {
+      continue;
+    }
+
+    var remote = this.remoteEntities[sessionId];
+    if (!remote) {
+      continue;
+    }
+
+    var status = this.networkClient.getPlayerManhuntStatus ? this.networkClient.getPlayerManhuntStatus(sessionId) : "none";
+    var shouldHide = phase === "roundOver" || (phase === "activeRound" && (status === "tagged" || status === "safe"));
+    remote.enabled = !shouldHide;
+  }
+};
+
 RemotePlayerManager.prototype._applyProfile = function (remote, profile) {
   if (!remote || !profile) {
     return;
@@ -314,8 +338,24 @@ RemotePlayerManager.prototype._updateNameplates = function () {
 
 
 RemotePlayerManager.prototype.shouldShowNameplate = function (remoteSessionId) {
-  if (!this.networkClient || !this.networkClient.isManhuntActive || !this.networkClient.isManhuntActive()) {
+  if (!this.networkClient || !this.networkClient.getManhuntState) {
     return true;
+  }
+
+  var manhunt = this.networkClient.getManhuntState();
+  var phase = manhunt ? manhunt.phase : "lobby";
+  if (phase === "lobby") {
+    return true;
+  }
+
+  if (phase === "roundOver") {
+    return false;
+  }
+
+  var localStatus = this.networkClient.getLocalManhuntStatus ? this.networkClient.getLocalManhuntStatus() : "none";
+  var remoteStatus = this.networkClient.getPlayerManhuntStatus ? this.networkClient.getPlayerManhuntStatus(remoteSessionId) : "none";
+  if (localStatus === "tagged" || localStatus === "safe" || remoteStatus === "tagged" || remoteStatus === "safe") {
+    return false;
   }
 
   var localTeam = this.networkClient.getLocalManhuntTeam ? this.networkClient.getLocalManhuntTeam() : "none";
