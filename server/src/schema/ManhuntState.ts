@@ -33,19 +33,19 @@ export class ManhuntState extends Schema {
   safeZoneRadius = 15;
 
   @type("number")
-  hiderStartX = 276.6;
+  hiderStartX = 285;
 
   @type("number")
-  hiderStartY = 1.81;
+  hiderStartY = 0.5;
 
   @type("number")
-  hiderStartZ = -242;
+  hiderStartZ = -88;
 
   @type("number")
-  seekerStartX = 296.6;
+  seekerStartX = 276.6;
 
   @type("number")
-  seekerStartY = 1.81;
+  seekerStartY = 0.5;
 
   @type("number")
   seekerStartZ = -222;
@@ -54,7 +54,7 @@ export class ManhuntState extends Schema {
   lobbySpawnX = 276.6;
 
   @type("number")
-  lobbySpawnY = 1.81;
+  lobbySpawnY = 0.5;
 
   @type("number")
   lobbySpawnZ = -222;

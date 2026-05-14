@@ -19,7 +19,7 @@ type ProfileMessage = {
 
 type Vec3 = { x: number; y: number; z: number };
 
-type ManhuntPhase = "lobby" | "countdown" | "hidingPhase" | "seekingPhase" | "roundOver";
+type ManhuntPhase = "lobby" | "teamReveal" | "spawnCountdown" | "activeRound" | "roundOver";
 type ManhuntTeam = "none" | "hider" | "seeker";
 type ManhuntStatus = "none" | "active" | "safe" | "tagged";
 
@@ -45,19 +45,23 @@ const DEFAULT_HAT_ID = "No Hat";
 const SAFE_HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 const ALLOWED_HAT_IDS = new Set(["No Hat", "Top Hat", "Western"]);
 
-// These Manhunt coordinates are server-authoritative PlayCanvas world-space marker positions.
-// Keep the matching PlayCanvas marker/collider entities in sync with these values.
+// These Manhunt coordinates are server-authoritative PlayCanvas world-space positions.
+// Home Base is a marker/collider center. Spawn positions below are player-root positions,
+// not visual floor positions, so keep PlayCanvas marker entities in sync with these values.
 const MANHUNT_HOME_BASE: Vec3 = { x: 276.6, y: -0.19, z: -222 };
 const MANHUNT_SAFE_ZONE_RADIUS = 15;
-// Player roots spawn slightly above the visual Home Base ground height so they do not fall through the floor.
-const MANHUNT_SEEKER_START: Vec3 = { x: MANHUNT_HOME_BASE.x, y: 0.5, z: MANHUNT_HOME_BASE.z };
-const MANHUNT_HIDER_START: Vec3 = { x: 285, y: 0.5, z: -88 };
-const MANHUNT_LOBBY_SPAWN: Vec3 = { x: MANHUNT_HOME_BASE.x, y: 0.5, z: MANHUNT_HOME_BASE.z };
+const HIDER_STARTS: Vec3[] = [
+  { x: 285, y: 0.5, z: -88 },
+  { x: 295, y: 0.5, z: -88 },
+  { x: 275, y: 0.5, z: -88 },
+];
+const SEEKER_START: Vec3 = { x: 276.6, y: 0.5, z: -222 };
+const LOBBY_SPAWN: Vec3 = { x: 276.6, y: 0.5, z: -222 };
 
-const MANHUNT_COUNTDOWN_SECONDS = 5;
-const MANHUNT_HIDING_SECONDS = 10;
-const MANHUNT_SEEKING_SECONDS = 90;
-const MANHUNT_RESULTS_SECONDS = 10;
+const TEAM_REVEAL_SECONDS = 5;
+const ROUND_START_COUNTDOWN_SECONDS = 5;
+const ACTIVE_ROUND_SECONDS = 60;
+const ROUND_OVER_SECONDS = 10;
 const MANHUNT_TAG_DISTANCE = 2.2;
 const MANHUNT_TICK_MS = 1000;
 
@@ -116,13 +120,13 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
       `[Manhunt] Home Base configured at (${MANHUNT_HOME_BASE.x}, ${MANHUNT_HOME_BASE.y}, ${MANHUNT_HOME_BASE.z}), radius ${MANHUNT_SAFE_ZONE_RADIUS}`,
     );
     console.log(
-      `[Manhunt] HiderStart configured at ${formatVec3(MANHUNT_HIDER_START)}`,
+      `[Manhunt] HiderStarts configured at ${HIDER_STARTS.map(formatVec3).join(", ")}`,
     );
     console.log(
-      `[Manhunt] SeekerStart configured at ${formatVec3(MANHUNT_SEEKER_START)}`,
+      `[Manhunt] SeekerStart configured at ${formatVec3(SEEKER_START)}`,
     );
     console.log(
-      `[Manhunt] LobbySpawn configured at ${formatVec3(MANHUNT_LOBBY_SPAWN)}`,
+      `[Manhunt] LobbySpawn configured at ${formatVec3(LOBBY_SPAWN)}`,
     );
   }
 
@@ -174,7 +178,7 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
         return;
       }
 
-      if (!this.shouldLockPlayerAtSeekerStart(player)) {
+      if (this.canPlayerMove(player)) {
         player.x = message.x;
         player.y = message.y;
         player.z = message.z;
@@ -187,7 +191,7 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
             ? message.yaw
             : undefined;
 
-      if (typeof rotY === "number" && Number.isFinite(rotY)) {
+      if (this.canPlayerMove(player) && typeof rotY === "number" && Number.isFinite(rotY)) {
         player.rotY = rotY;
       }
 
@@ -241,9 +245,9 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     manhunt.safeZoneY = MANHUNT_HOME_BASE.y;
     manhunt.safeZoneZ = MANHUNT_HOME_BASE.z;
     manhunt.safeZoneRadius = MANHUNT_SAFE_ZONE_RADIUS;
-    const hiderStart = MANHUNT_HIDER_START;
-    const seekerStart = MANHUNT_SEEKER_START;
-    const lobbySpawn = MANHUNT_LOBBY_SPAWN;
+    const hiderStart = HIDER_STARTS[0];
+    const seekerStart = SEEKER_START;
+    const lobbySpawn = LOBBY_SPAWN;
     manhunt.hiderStartX = hiderStart.x;
     manhunt.hiderStartY = hiderStart.y;
     manhunt.hiderStartZ = hiderStart.z;
@@ -266,7 +270,7 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     }
 
     const phase = this.state.manhunt.phase as ManhuntPhase;
-    if (phase !== "lobby" && phase !== "roundOver") {
+    if (phase !== "lobby") {
       this.rejectManhuntRequest(client, "A Manhunt round is already running.");
       return;
     }
@@ -311,29 +315,26 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
   private startManhuntRound(startedBy: string, entries: [string, PlayerState][]): void {
     const sorted = entries.sort(([a], [b]) => a.localeCompare(b));
     const nextRoundNumber = this.state.manhunt.roundNumber + 1;
-    const seekerIndex = this.state.manhunt.roundNumber % sorted.length;
-    const seekerId = sorted[seekerIndex][0];
+    const rotated = this.rotateEntries(sorted, this.state.manhunt.roundNumber);
+    const seekerCount = Math.floor(sorted.length / 2);
+    const seekerIds = new Set(rotated.slice(0, seekerCount).map(([sessionId]) => sessionId));
 
     this.state.manhunt.roundNumber = nextRoundNumber;
     this.state.manhunt.startedBy = startedBy;
-    this.state.manhunt.phase = "countdown";
-    this.state.manhunt.timerSeconds = MANHUNT_COUNTDOWN_SECONDS;
-    this.state.manhunt.message = "Teams assigned. Hiders, stay out of sight and sneak back to Home Base.";
+    this.state.manhunt.phase = "teamReveal";
+    this.state.manhunt.timerSeconds = TEAM_REVEAL_SECONDS;
+    this.state.manhunt.message = "Teams assigned. Get ready for Manhunt.";
 
     for (const [sessionId, player] of sorted) {
-      const team: ManhuntTeam = sessionId === seekerId ? "seeker" : "hider";
+      const team: ManhuntTeam = seekerIds.has(sessionId) ? "seeker" : "hider";
       player.manhuntTeam = team;
       player.manhuntStatus = "active";
       player.manhuntPoints = 0;
       player.isInManhuntRound = true;
-      const spawnName = team === "seeker" ? "SeekerStart" : "HiderStart";
-      const spawn = team === "seeker" ? this.getSeekerStart() : this.getHiderStart();
-      this.teleportPlayer(player, spawn);
       console.log(`[Manhunt] team assignment: ${this.playerLabel(sessionId)} -> ${team}`);
-      console.log(`[ManhuntDebug] teleporting ${player.name} (${sessionId.slice(0, 4)}) as ${team} to ${spawnName} ${formatVec3(spawn)}`);
     }
 
-    console.log(`[Manhunt] phase changed -> countdown (${MANHUNT_COUNTDOWN_SECONDS}s), seeker=${this.playerLabel(seekerId)}`);
+    console.log(`[Manhunt] phase changed -> teamReveal (${TEAM_REVEAL_SECONDS}s), seekers=${Array.from(seekerIds).map((id) => this.playerLabel(id)).join(", ")}`);
   }
 
   private updateManhuntTimer(): void {
@@ -344,7 +345,7 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
       return;
     }
 
-    if (phase === "seekingPhase") {
+    if (phase === "activeRound") {
       this.checkSafeZoneEntries();
       if (this.areAllHidersResolved()) {
         this.finishManhuntRound("All hiders are safe or tagged!");
@@ -357,17 +358,18 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
       return;
     }
 
-    if (phase === "countdown") {
-      this.setManhuntPhase("hidingPhase", MANHUNT_HIDING_SECONDS, "Hiders: Stay out of sight. Sneak back to Home Base.");
+    if (phase === "teamReveal") {
+      this.teleportPlayersToManhuntStarts();
+      this.setManhuntPhase("spawnCountdown", ROUND_START_COUNTDOWN_SECONDS, "Round starts soon. Get ready!");
       return;
     }
 
-    if (phase === "hidingPhase") {
-      this.setManhuntPhase("seekingPhase", MANHUNT_SEEKING_SECONDS, "Seekers released! Protect Home Base. Watch for hiders and tag them with E.");
+    if (phase === "spawnCountdown") {
+      this.setManhuntPhase("activeRound", ACTIVE_ROUND_SECONDS, "Manhunt is live!");
       return;
     }
 
-    if (phase === "seekingPhase") {
+    if (phase === "activeRound") {
       this.finishManhuntRound("Time is up!");
       return;
     }
@@ -386,8 +388,8 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
 
   private handleManhuntTagRequest(client: Client): void {
     const seeker = this.state.players.get(client.sessionId);
-    if (!seeker || this.state.manhunt.phase !== "seekingPhase" || seeker.manhuntTeam !== "seeker") {
-      client.send("manhunt:feedback", { message: "Only seekers can tag during the seek phase." });
+    if (!seeker || this.state.manhunt.phase !== "activeRound" || seeker.manhuntTeam !== "seeker" || seeker.manhuntStatus !== "active") {
+      client.send("manhunt:feedback", { message: "Only seekers can tag during the active round." });
       return;
     }
 
@@ -456,8 +458,7 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
       }
     }
 
-    this.setManhuntPhase("roundOver", MANHUNT_RESULTS_SECONDS, reason);
-    this.teleportManhuntPlayers(this.getLobbySpawn());
+    this.setManhuntPhase("roundOver", ROUND_OVER_SECONDS, this.buildRoundOverMessage(reason));
     console.log(`[Manhunt] round over: ${reason}`);
   }
 
@@ -466,6 +467,8 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     this.state.manhunt.timerSeconds = 0;
     this.state.manhunt.message = "Go to Home Base and press M to start Manhunt.";
     this.state.manhunt.startedBy = "";
+
+    this.teleportManhuntPlayers(this.getLobbySpawn());
 
     for (const [, player] of this.state.players.entries()) {
       this.resetPlayerManhuntFields(player, true);
@@ -499,9 +502,57 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     player.serverTeleportId += 1;
   }
 
-  private shouldLockPlayerAtSeekerStart(player: PlayerState): boolean {
-    return player.manhuntTeam === "seeker" &&
-      (this.state.manhunt.phase === "countdown" || this.state.manhunt.phase === "hidingPhase");
+  private canPlayerMove(player: PlayerState): boolean {
+    const phase = this.state.manhunt.phase as ManhuntPhase;
+    if (phase === "teamReveal" || phase === "spawnCountdown" || phase === "roundOver") {
+      return false;
+    }
+
+    if (player.manhuntStatus === "tagged" || player.manhuntStatus === "safe") {
+      return false;
+    }
+
+    return true;
+  }
+
+  private rotateEntries(entries: [string, PlayerState][], offset: number): [string, PlayerState][] {
+    if (entries.length === 0) {
+      return [];
+    }
+
+    const start = offset % entries.length;
+    return entries.slice(start).concat(entries.slice(0, start));
+  }
+
+  private teleportPlayersToManhuntStarts(): void {
+    let hiderIndex = 0;
+    for (const [sessionId, player] of this.state.players.entries()) {
+      if (!player.isInManhuntRound) {
+        continue;
+      }
+
+      const spawn = player.manhuntTeam === "seeker" ? this.getSeekerStart() : this.getHiderStartAt(hiderIndex++);
+      const spawnName = player.manhuntTeam === "seeker" ? "SeekerStart" : `HiderStart${((hiderIndex - 1) % HIDER_STARTS.length) + 1}`;
+      this.teleportPlayer(player, spawn);
+      console.log(`[ManhuntDebug] teleporting ${this.playerLabel(sessionId)} as ${player.manhuntTeam} to ${spawnName} ${formatVec3(spawn)}`);
+    }
+  }
+
+  private buildRoundOverMessage(reason: string): string {
+    const hiderScore = this.getTeamScore("hider");
+    const seekerScore = this.getTeamScore("seeker");
+    const winner = hiderScore > seekerScore ? "HIDERS WIN" : seekerScore > hiderScore ? "SEEKERS WIN" : "TIE ROUND";
+    return `${winner} — ${reason}`;
+  }
+
+  private getTeamScore(team: ManhuntTeam): number {
+    let score = 0;
+    for (const [, player] of this.state.players.entries()) {
+      if (player.manhuntTeam === team) {
+        score += player.manhuntPoints;
+      }
+    }
+    return score;
   }
 
   private isPlayerInSafeZone(player: PlayerState): boolean {
@@ -510,12 +561,11 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
 
   private logManhuntConfig(): void {
     const safeZone = this.getSafeZone();
-    const hiderStart = this.getHiderStart();
     const seekerStart = this.getSeekerStart();
     const lobbySpawn = this.getLobbySpawn();
 
     console.log(`[Manhunt] Home Base configured at ${formatVec3(safeZone)}, radius ${this.state.manhunt.safeZoneRadius}`);
-    console.log(`[Manhunt] HiderStart configured at ${formatVec3(hiderStart)}`);
+    console.log(`[Manhunt] HiderStarts configured at ${HIDER_STARTS.map(formatVec3).join(", ")}`);
     console.log(`[Manhunt] SeekerStart configured at ${formatVec3(seekerStart)}`);
     console.log(`[Manhunt] LobbySpawn configured at ${formatVec3(lobbySpawn)}`);
   }
@@ -545,7 +595,7 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
   }
 
   private isRoundActive(): boolean {
-    return ["countdown", "hidingPhase", "seekingPhase"].includes(this.state.manhunt.phase);
+    return ["teamReveal", "spawnCountdown", "activeRound"].includes(this.state.manhunt.phase);
   }
 
   private playerPosition(player: PlayerState): Vec3 {
@@ -558,6 +608,10 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
 
   private getHiderStart(): Vec3 {
     return { x: this.state.manhunt.hiderStartX, y: this.state.manhunt.hiderStartY, z: this.state.manhunt.hiderStartZ };
+  }
+
+  private getHiderStartAt(index: number): Vec3 {
+    return HIDER_STARTS[index % HIDER_STARTS.length];
   }
 
   private getSeekerStart(): Vec3 {

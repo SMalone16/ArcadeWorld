@@ -331,7 +331,7 @@ LocalPlayerController.prototype.update = function (dt) {
 
   this._updateGroundedState();
   this._updateMovementVelocity(dt);
-  if (this._isLocalSeekerLocked()) {
+  if (this.shouldLockMovementForManhunt()) {
     this._cancelJumpCharge();
   } else {
     this._updateJumpCharge(dt);
@@ -521,7 +521,7 @@ LocalPlayerController.prototype._updateMovementVelocity = function (_dt) {
 LocalPlayerController.prototype._readMovementInput = function () {
   this._localMoveInput.set(0, 0, 0);
 
-  if (this._isLocalSeekerLocked()) return;
+  if (this.shouldLockMovementForManhunt()) return;
 
   if (!this.app.keyboard) return;
 
@@ -573,14 +573,20 @@ LocalPlayerController.prototype._applyBodyYaw = function () {
   }
 };
 
-LocalPlayerController.prototype._isLocalSeekerLocked = function () {
-  if (!this.networkClient || !this.networkClient.getManhuntState || !this.networkClient.getLocalManhuntTeam) {
+LocalPlayerController.prototype.shouldLockMovementForManhunt = function () {
+  if (!this.networkClient || !this.networkClient.getManhuntState) {
     return false;
   }
 
   var state = this.networkClient.getManhuntState();
   var phase = state ? state.phase : "lobby";
-  return (phase === "countdown" || phase === "hidingPhase") && this.networkClient.getLocalManhuntTeam() === "seeker";
+  var status = this.networkClient.getLocalManhuntStatus ? this.networkClient.getLocalManhuntStatus() : "none";
+
+  return phase === "teamReveal" ||
+    phase === "spawnCountdown" ||
+    phase === "roundOver" ||
+    status === "tagged" ||
+    status === "safe";
 };
 
 LocalPlayerController.prototype._applyCameraTransform = function () {

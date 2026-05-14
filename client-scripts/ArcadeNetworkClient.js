@@ -650,6 +650,15 @@ ArcadeNetworkClient.prototype.getManhuntState = function () {
     safeZoneY: manhunt.safeZoneY || 0,
     safeZoneZ: manhunt.safeZoneZ || 0,
     safeZoneRadius: manhunt.safeZoneRadius || 0,
+    hiderStartX: manhunt.hiderStartX || 0,
+    hiderStartY: manhunt.hiderStartY || 0,
+    hiderStartZ: manhunt.hiderStartZ || 0,
+    seekerStartX: manhunt.seekerStartX || 0,
+    seekerStartY: manhunt.seekerStartY || 0,
+    seekerStartZ: manhunt.seekerStartZ || 0,
+    lobbySpawnX: manhunt.lobbySpawnX || 0,
+    lobbySpawnY: manhunt.lobbySpawnY || 0,
+    lobbySpawnZ: manhunt.lobbySpawnZ || 0,
     players: players
   };
 };
@@ -688,7 +697,7 @@ ArcadeNetworkClient.prototype.getPlayerDisplayName = function (sessionId) {
 
 ArcadeNetworkClient.prototype.isManhuntActive = function () {
   var phase = this.getManhuntState().phase;
-  return phase === "countdown" || phase === "hidingPhase" || phase === "seekingPhase";
+  return phase === "teamReveal" || phase === "spawnCountdown" || phase === "activeRound";
 };
 
 ArcadeNetworkClient.prototype.onManhuntStateChanged = function (callback) {
