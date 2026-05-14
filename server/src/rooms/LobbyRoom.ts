@@ -76,7 +76,7 @@ const LOBBY_SPAWN: Vec3 = { x: 276.6, y: 0.5, z: -222 };
 const TEAM_REVEAL_SECONDS = 5;
 const ROUND_START_COUNTDOWN_SECONDS = 5;
 const ACTIVE_ROUND_SECONDS = 60;
-const ROUND_OVER_SECONDS = 10;
+const ROUND_OVER_SECONDS = 30;
 const MANHUNT_TAG_DISTANCE = 2.2;
 const MANHUNT_TICK_MS = 1000;
 
@@ -149,6 +149,8 @@ function copyVec3(position: Vec3): Vec3 {
  */
 export class LobbyRoom extends Room<ArcadeWorldState> {
   maxClients = 64;
+
+  private lastRoundTeams = new Map<string, ManhuntTeam>();
 
   static logManhuntStartupConfig(): void {
     console.log(
@@ -449,12 +451,12 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     startedBy: string,
     entries: [string, PlayerState][],
   ): void {
-    const sorted = entries.sort(([a], [b]) => a.localeCompare(b));
+    const sorted = [...entries].sort(([a], [b]) => a.localeCompare(b));
     const nextRoundNumber = this.state.manhunt.roundNumber + 1;
-    const rotated = this.rotateEntries(sorted, this.state.manhunt.roundNumber);
-    const seekerCount = Math.floor(sorted.length / 2);
+    const shuffled = this.chooseBalancedShuffledEntries(sorted);
+    const seekerCount = Math.max(1, Math.floor(shuffled.length / 2));
     const seekerIds = new Set(
-      rotated.slice(0, seekerCount).map(([sessionId]) => sessionId),
+      shuffled.slice(0, seekerCount).map(([sessionId]) => sessionId),
     );
 
     this.state.manhunt.roundNumber = nextRoundNumber;
@@ -463,14 +465,16 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     this.state.manhunt.timerSeconds = TEAM_REVEAL_SECONDS;
     this.state.manhunt.message = "Teams assigned. Get ready for Manhunt.";
 
+    this.lastRoundTeams.clear();
     for (const [sessionId, player] of sorted) {
       const team: ManhuntTeam = seekerIds.has(sessionId) ? "seeker" : "hider";
       player.manhuntTeam = team;
       player.manhuntStatus = "active";
       player.manhuntPoints = 0;
       player.isInManhuntRound = true;
+      this.lastRoundTeams.set(sessionId, team);
       console.log(
-        `[Manhunt] team assignment: ${this.playerLabel(sessionId)} -> ${team}`,
+        `[Manhunt] randomized team assignment round ${nextRoundNumber}: ${this.playerLabel(sessionId)} -> ${team}`,
       );
     }
 
@@ -721,16 +725,48 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     return true;
   }
 
-  private rotateEntries(
+  private chooseBalancedShuffledEntries(
     entries: [string, PlayerState][],
-    offset: number,
   ): [string, PlayerState][] {
-    if (entries.length === 0) {
-      return [];
+    let best = this.shuffleEntries(entries);
+    let bestChangedCount = this.countTeamChanges(best);
+
+    // Try a few random balanced candidates to reduce frustrating repeated roles
+    // without making team assignment deterministic again.
+    for (let attempt = 1; attempt < 8; attempt += 1) {
+      const candidate = this.shuffleEntries(entries);
+      const changedCount = this.countTeamChanges(candidate);
+      if (changedCount > bestChangedCount) {
+        best = candidate;
+        bestChangedCount = changedCount;
+      }
     }
 
-    const start = offset % entries.length;
-    return entries.slice(start).concat(entries.slice(0, start));
+    return best;
+  }
+
+  private countTeamChanges(entries: [string, PlayerState][]): number {
+    const seekerCount = Math.max(1, Math.floor(entries.length / 2));
+    let changes = 0;
+    entries.forEach(([sessionId], index) => {
+      const nextTeam: ManhuntTeam = index < seekerCount ? "seeker" : "hider";
+      const previousTeam = this.lastRoundTeams.get(sessionId);
+      if (previousTeam && previousTeam !== nextTeam) {
+        changes += 1;
+      }
+    });
+    return changes;
+  }
+
+  private shuffleEntries(
+    entries: [string, PlayerState][],
+  ): [string, PlayerState][] {
+    const shuffled = [...entries];
+    for (let i = shuffled.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
   }
 
   private teleportPlayersToManhuntStarts(): void {

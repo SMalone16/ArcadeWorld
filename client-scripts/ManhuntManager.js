@@ -87,7 +87,7 @@ ManhuntManager.prototype.getSnapshot = function () {
     safeZoneY: serverState ? serverState.safeZoneY : 0,
     safeZoneZ: serverState ? serverState.safeZoneZ : 0,
     safeZoneRadius: serverState ? serverState.safeZoneRadius : this.safeZoneRadius,
-    results: this._playersToResults(players)
+    results: this._playersToResults(players, localId)
   };
 };
 
@@ -310,16 +310,6 @@ ManhuntManager.prototype._renderSpectatorOverlay = function (snapshot) {
 };
 
 ManhuntManager.prototype._getResultsHtml = function (snapshot, includeTitle) {
-  var rows = snapshot.results.map(function (player) {
-    return "<tr>" +
-      "<td style='text-align:left;padding:6px 10px;'>" + ManhuntManager.escapeHtml(player.name) + "</td>" +
-      "<td style='padding:6px 10px;'>" + ManhuntManager.escapeHtml(this._formatTeam(player.manhuntTeam)) + "</td>" +
-      "<td style='padding:6px 10px;'>" + ManhuntManager.escapeHtml(this._formatStatus(player)) + "</td>" +
-      "<td style='padding:6px 10px;text-align:right;'>" + (player.manhuntPoints || 0) + "</td>" +
-      "<td style='padding:6px 10px;text-align:right;'>" + (player.totalPoints || 0) + "</td>" +
-    "</tr>";
-  }, this).join("");
-
   var title = this._getWinnerTitle(snapshot);
   return "" +
     (includeTitle ? "<div style='font-size:48px;color:#ffd166;text-align:center;'>" + ManhuntManager.escapeHtml(title) + "</div>" : "<div style='font-size:30px;color:#ffd166;'>Scoreboard</div>") +
@@ -328,8 +318,82 @@ ManhuntManager.prototype._getResultsHtml = function (snapshot, includeTitle) {
       this._statPill("Hiders Remaining", snapshot.hidersActive) + this._statPill("Hiders Tagged", snapshot.hidersTagged) + this._statPill("Hiders Safe", snapshot.hidersSafe) +
       this._statPill("Hider Score", snapshot.hiderScore) + this._statPill("Seeker Score", snapshot.seekerScore) +
     "</div>" +
-    "<table style='width:100%;border-collapse:collapse;font-size:16px;'><thead><tr style='color:#7ad3ff;'><th style='text-align:left;padding:6px 10px;'>Name</th><th>Team</th><th>Status</th><th style='text-align:right;'>Round</th><th style='text-align:right;'>Total</th></tr></thead><tbody>" + rows + "</tbody></table>" +
+    "<div style='display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;align-items:start;'>" +
+      this._getTeamResultsHtml(snapshot, "hider") +
+      this._getTeamResultsHtml(snapshot, "seeker") +
+    "</div>" +
     (snapshot.state === "roundOver" ? "<div style='text-align:center;font-size:18px;margin-top:16px;'>Free roam resumes in " + Math.max(1, snapshot.timerSeconds) + "...</div>" : "");
+};
+
+ManhuntManager.prototype._getTeamResultsHtml = function (snapshot, team) {
+  var localId = this._getLocalPlayerId();
+  var teamResults = snapshot.results.filter(function (player) { return player.manhuntTeam === team; });
+  teamResults.sort(this._compareResults.bind(this));
+
+  var localIndex = -1;
+  for (var i = 0; i < teamResults.length; i++) {
+    if (teamResults[i].sessionId === localId || teamResults[i].isLocal) {
+      localIndex = i;
+      break;
+    }
+  }
+  if (localIndex > 0) {
+    var local = teamResults.splice(localIndex, 1)[0];
+    teamResults.unshift(local);
+  }
+
+  var rows = teamResults.map(function (player, index) {
+    return this._getResultRowHtml(player, index);
+  }, this).join("");
+  if (!rows) {
+    rows = "<tr><td colspan='4' style='padding:10px;color:#bde0fe;text-align:center;'>No " + ManhuntManager.escapeHtml(this._formatTeam(team).toLowerCase()) + "s this round.</td></tr>";
+  }
+
+  var accent = team === "hider" ? "#7cff8a" : "#ff7a7a";
+  return "" +
+    "<section style='border:2px solid " + accent + ";border-radius:18px;background:rgba(255,255,255,0.055);overflow:hidden;'>" +
+      "<div style='padding:10px 12px;background:rgba(255,255,255,0.08);font-size:22px;color:" + accent + ";letter-spacing:0.5px;'>" + ManhuntManager.escapeHtml(this._formatTeam(team) + "s") + "</div>" +
+      "<table style='width:100%;border-collapse:collapse;font-size:16px;'>" +
+        "<thead><tr style='color:#7ad3ff;'><th style='text-align:left;padding:7px 10px;'>Name</th><th style='padding:7px 8px;'>Status</th><th style='padding:7px 8px;text-align:right;'>Round</th><th style='padding:7px 10px;text-align:right;'>Total</th></tr></thead>" +
+        "<tbody>" + rows + "</tbody>" +
+      "</table>" +
+    "</section>";
+};
+
+ManhuntManager.prototype._getResultRowHtml = function (player, index) {
+  var isLocal = player.isLocal || player.sessionId === this._getLocalPlayerId();
+  var color = this._safeCssColor(player.color, player.manhuntTeam === "hider" ? "#7cff8a" : "#ff7a7a");
+  var style = isLocal
+    ? "background:linear-gradient(90deg," + this._hexToRgba(color, 0.34) + ",rgba(255,255,255,0.08));border-left:6px solid " + color + ";box-shadow:inset 0 0 0 2px " + this._hexToRgba(color, 0.75) + ",0 0 16px " + this._hexToRgba(color, 0.45) + ";"
+    : "background:" + (index % 2 === 0 ? "rgba(255,255,255,0.035)" : "rgba(255,255,255,0.075)") + ";";
+  var label = isLocal ? " <span style='display:inline-block;margin-left:6px;padding:2px 6px;border-radius:999px;background:" + color + ";color:#06101f;text-shadow:none;font-size:11px;font-weight:900;'>YOU</span>" : "";
+
+  return "<tr style='" + style + "'>" +
+    "<td style='text-align:left;padding:8px 10px;font-weight:900;'>" + ManhuntManager.escapeHtml(player.name) + label + "</td>" +
+    "<td style='padding:8px 8px;text-align:center;'>" + ManhuntManager.escapeHtml(this._formatStatus(player)) + "</td>" +
+    "<td style='padding:8px 8px;text-align:right;'>" + (player.manhuntPoints || 0) + "</td>" +
+    "<td style='padding:8px 10px;text-align:right;'>" + (player.totalPoints || 0) + "</td>" +
+  "</tr>";
+};
+
+ManhuntManager.prototype._compareResults = function (a, b) {
+  var pointsDelta = (b.manhuntPoints || 0) - (a.manhuntPoints || 0);
+  if (pointsDelta !== 0) return pointsDelta;
+  var totalDelta = (b.totalPoints || 0) - (a.totalPoints || 0);
+  if (totalDelta !== 0) return totalDelta;
+  return String(a.name || "").localeCompare(String(b.name || ""));
+};
+
+ManhuntManager.prototype._safeCssColor = function (value, fallback) {
+  return typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value) ? value : fallback;
+};
+
+ManhuntManager.prototype._hexToRgba = function (hex, alpha) {
+  var safe = this._safeCssColor(hex, "#44aaff");
+  var r = parseInt(safe.slice(1, 3), 16);
+  var g = parseInt(safe.slice(3, 5), 16);
+  var b = parseInt(safe.slice(5, 7), 16);
+  return "rgba(" + r + "," + g + "," + b + "," + alpha + ")";
 };
 
 ManhuntManager.prototype._statPill = function (label, value) {
@@ -400,7 +464,7 @@ ManhuntManager.prototype._collectAndSetVisuals = function (entity, visible) {
   }
 };
 
-ManhuntManager.prototype._playersToResults = function (players) {
+ManhuntManager.prototype._playersToResults = function (players, localId) {
   var results = [];
   for (var sessionId in players) {
     if (Object.prototype.hasOwnProperty.call(players, sessionId)) {
@@ -408,14 +472,15 @@ ManhuntManager.prototype._playersToResults = function (players) {
       results.push({
         sessionId: sessionId,
         name: player.name || this._getPlayerDisplayName(sessionId),
+        color: player.color || "#44aaff",
         manhuntTeam: player.manhuntTeam || "none",
         manhuntStatus: player.manhuntStatus || "none",
         manhuntPoints: player.manhuntPoints || 0,
-        totalPoints: player.totalPoints || 0
+        totalPoints: player.totalPoints || 0,
+        isLocal: sessionId === localId
       });
     }
   }
-  results.sort(function (a, b) { return a.name.localeCompare(b.name); });
   return results;
 };
 

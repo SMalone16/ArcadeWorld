@@ -107,6 +107,60 @@ LocalPlayerController.attributes.add("showMouseLookDebug", {
   title: "Show Mouse Look Debug"
 });
 
+LocalPlayerController.attributes.add("seekerSprintMultiplier", {
+  type: "number",
+  default: 2,
+  title: "Seeker Sprint Multiplier"
+});
+
+LocalPlayerController.attributes.add("seekerSprintDuration", {
+  type: "number",
+  default: 2,
+  title: "Seeker Sprint Duration"
+});
+
+LocalPlayerController.attributes.add("seekerSprintRefillDuration", {
+  type: "number",
+  default: 5,
+  title: "Seeker Sprint Refill Duration"
+});
+
+LocalPlayerController.attributes.add("seekerSprintStartThreshold", {
+  type: "number",
+  default: 0.5,
+  title: "Seeker Sprint Start Threshold"
+});
+
+LocalPlayerController.attributes.add("hiderSprintMultiplier", {
+  type: "number",
+  default: 1.5,
+  title: "Hider Sprint Multiplier"
+});
+
+LocalPlayerController.attributes.add("hiderSprintDuration", {
+  type: "number",
+  default: 4,
+  title: "Hider Sprint Duration"
+});
+
+LocalPlayerController.attributes.add("hiderSprintRefillDuration", {
+  type: "number",
+  default: 4,
+  title: "Hider Sprint Refill Duration"
+});
+
+LocalPlayerController.attributes.add("hiderSprintStartThreshold", {
+  type: "number",
+  default: 0.25,
+  title: "Hider Sprint Start Threshold"
+});
+
+LocalPlayerController.attributes.add("sprintDepletedRechargeDelay", {
+  type: "number",
+  default: 0.25,
+  title: "Sprint Depleted Recharge Delay"
+});
+
 LocalPlayerController.prototype.initialize = function () {
   this.networkClient = null;
   this.sendTimer = 0;
@@ -131,6 +185,12 @@ LocalPlayerController.prototype.initialize = function () {
   this._lastAppliedYawDegrees = null;
   this._isModifyingRootRotation = false;
   this._mouseLookDebugHud = null;
+  this._sprintHud = null;
+  this.sprintStamina = 1;
+  this.isSprinting = false;
+  this.sprintRechargeDelayTimer = 0;
+  this.sprintDepletedPenaltyActive = false;
+  this._shiftWasReleasedAfterDepletion = true;
   this._groundRaycastFilterBound = this._isValidGroundHit.bind(this);
 
   this._onMouseMoveBound = this._onMouseMove.bind(this);
@@ -230,7 +290,10 @@ LocalPlayerController.prototype._onEnable = function () {
   console.log("[LocalPlayerController] Input enabled");
 };
 
-LocalPlayerController.prototype._onDisable = function () {};
+LocalPlayerController.prototype._onDisable = function () {
+  this.isSprinting = false;
+  this._destroySprintHud();
+};
 
 LocalPlayerController.prototype._onDestroy = function () {
   if (this.app.mouse) {
@@ -241,6 +304,7 @@ LocalPlayerController.prototype._onDestroy = function () {
   this.app.off("arcade:profileReady", this._onProfileReadyBound, this);
   this.app.off("arcade:startGame", this._onStartGameBound, this);
   this._destroyMouseLookDebugHud();
+  this._destroySprintHud();
 };
 
 LocalPlayerController.prototype._onStateChanged = function (state) {
@@ -285,6 +349,7 @@ LocalPlayerController.prototype._releasePointerLock = function () {
 LocalPlayerController.prototype._stopMovementVelocity = function () {
   this._localMoveInput.set(0, 0, 0);
   this._move.set(0, 0, 0);
+  this.isSprinting = false;
   if (!this.entity.rigidbody || this.entity.rigidbody.type !== pc.BODYTYPE_DYNAMIC) {
     return;
   }
@@ -337,6 +402,8 @@ LocalPlayerController.prototype.update = function (dt) {
       this._releasePointerLock();
     }
     this._stopMovementVelocity();
+    this._updateSprint(dt);
+    this._updateSprintHud(false);
     return;
   }
 
@@ -507,11 +574,14 @@ LocalPlayerController.prototype._cancelJumpCharge = function () {
   this.jumpChargeTime = 0;
 };
 
-LocalPlayerController.prototype._updateMovementVelocity = function (_dt) {
+LocalPlayerController.prototype._updateMovementVelocity = function (dt) {
   this._readMovementInput();
   this._buildYawRelativeMove();
+  this._updateSprint(dt);
 
-  this._targetVelocity.copy(this._move).scale(this.moveSpeed);
+  var sprintConfig = this._getSprintConfig();
+  var speed = this.moveSpeed * (this.isSprinting && sprintConfig ? sprintConfig.multiplier : 1);
+  this._targetVelocity.copy(this._move).scale(speed);
 
   if (!this.entity.rigidbody || this.entity.rigidbody.type !== pc.BODYTYPE_DYNAMIC) {
     return;
@@ -544,6 +614,99 @@ LocalPlayerController.prototype._readMovementInput = function () {
   if (this._localMoveInput.lengthSq() > 1) {
     this._localMoveInput.normalize();
   }
+};
+
+LocalPlayerController.prototype._updateSprint = function (dt) {
+  var config = this._getSprintConfig();
+  var shiftDown = this._isSprintKeyDown();
+  var hasMovement = this._hasMovementInput();
+  var canSprintInState = !!config && !this.shouldLockMovementForManhunt();
+
+  if (!shiftDown) {
+    this.isSprinting = false;
+    this._shiftWasReleasedAfterDepletion = true;
+  }
+
+  if (!canSprintInState || !hasMovement) {
+    this.isSprinting = false;
+  }
+
+  if (this.sprintRechargeDelayTimer > 0) {
+    this.sprintRechargeDelayTimer = Math.max(0, this.sprintRechargeDelayTimer - dt);
+  }
+
+  if (this.isSprinting && (!shiftDown || !canSprintInState || !hasMovement)) {
+    this.isSprinting = false;
+  }
+
+  if (!this.isSprinting && shiftDown && canSprintInState && hasMovement && this._canStartSprint(config)) {
+    this.isSprinting = true;
+    this.sprintDepletedPenaltyActive = false;
+  }
+
+  if (this.isSprinting) {
+    this.sprintStamina = Math.max(0, this.sprintStamina - dt / Math.max(config.sprintDuration, 0.001));
+    if (this.sprintStamina <= 0) {
+      this.sprintStamina = 0;
+      this.isSprinting = false;
+      this.sprintDepletedPenaltyActive = true;
+      this._shiftWasReleasedAfterDepletion = false;
+      this.sprintRechargeDelayTimer = Math.max(this.sprintDepletedRechargeDelay || 0, 0);
+    }
+  } else if (this.sprintRechargeDelayTimer <= 0) {
+    var refillDuration = config ? config.refillDuration : this.hiderSprintRefillDuration;
+    this.sprintStamina = Math.min(1, this.sprintStamina + dt / Math.max(refillDuration || 1, 0.001));
+    if (this.sprintStamina >= 1 || (config && this.sprintStamina > config.startThreshold)) {
+      this.sprintDepletedPenaltyActive = false;
+    }
+  }
+
+  this._updateSprintHud(this._isPlaying());
+};
+
+LocalPlayerController.prototype._canStartSprint = function (config) {
+  if (!config || this.isSprinting || this.sprintRechargeDelayTimer > 0) return false;
+  if (this.sprintDepletedPenaltyActive && !this._shiftWasReleasedAfterDepletion) return false;
+  return this.sprintStamina >= config.startThreshold;
+};
+
+LocalPlayerController.prototype._getLocalManhuntTeam = function () {
+  if (!this.networkClient || !this.networkClient.getLocalManhuntTeam) return "none";
+  return this.networkClient.getLocalManhuntTeam() || "none";
+};
+
+LocalPlayerController.prototype._getSprintConfig = function () {
+  var state = this.networkClient && this.networkClient.getManhuntState ? this.networkClient.getManhuntState() : null;
+  if (!state || state.phase !== "activeRound") return null;
+
+  var team = this._getLocalManhuntTeam();
+  if (team === "seeker") {
+    return {
+      multiplier: this.seekerSprintMultiplier,
+      sprintDuration: this.seekerSprintDuration,
+      refillDuration: this.seekerSprintRefillDuration,
+      startThreshold: this.seekerSprintStartThreshold
+    };
+  }
+  if (team === "hider") {
+    return {
+      multiplier: this.hiderSprintMultiplier,
+      sprintDuration: this.hiderSprintDuration,
+      refillDuration: this.hiderSprintRefillDuration,
+      startThreshold: this.hiderSprintStartThreshold
+    };
+  }
+  return null;
+};
+
+LocalPlayerController.prototype._hasMovementInput = function () {
+  return this._localMoveInput.lengthSq() > 0;
+};
+
+LocalPlayerController.prototype._isSprintKeyDown = function () {
+  if (!this.app.keyboard) return false;
+  var shiftKey = typeof pc.KEY_SHIFT === "number" ? pc.KEY_SHIFT : 16;
+  return this.app.keyboard.isPressed(shiftKey);
 };
 
 LocalPlayerController.prototype._buildYawRelativeMove = function () {
@@ -667,6 +830,62 @@ LocalPlayerController.prototype._updateMouseLookDebugHud = function (shouldShow)
     "camera pos: " + this._formatDebugVec3(cameraPos),
     "camera: " + (this.cameraEntity ? this.cameraEntity.name : "none")
   ].join("\n");
+};
+
+LocalPlayerController.prototype._updateSprintHud = function (shouldShow) {
+  if (!shouldShow || typeof document === "undefined") {
+    this._destroySprintHud();
+    return;
+  }
+
+  if (!this._sprintHud) {
+    this._sprintHud = document.createElement("div");
+    this._sprintHud.style.position = "fixed";
+    this._sprintHud.style.left = "14px";
+    this._sprintHud.style.bottom = "16px";
+    this._sprintHud.style.zIndex = "9200";
+    this._sprintHud.style.width = "220px";
+    this._sprintHud.style.padding = "9px 11px";
+    this._sprintHud.style.borderRadius = "12px";
+    this._sprintHud.style.background = "rgba(5, 12, 24, 0.82)";
+    this._sprintHud.style.border = "2px solid rgba(255,255,255,0.18)";
+    this._sprintHud.style.color = "#ffffff";
+    this._sprintHud.style.font = "800 13px/1.25 Arial, sans-serif";
+    this._sprintHud.style.pointerEvents = "none";
+    this._sprintHud.style.textShadow = "0 1px 3px rgba(0,0,0,0.9)";
+    document.body.appendChild(this._sprintHud);
+  }
+
+  var state = this.networkClient && this.networkClient.getManhuntState ? this.networkClient.getManhuntState() : null;
+  var localId = this.networkClient && this.networkClient.getLocalPlayerId ? this.networkClient.getLocalPlayerId() : "";
+  var localPlayer = state && state.players ? state.players[localId] : null;
+  var team = this._getLocalManhuntTeam();
+  var accent = this._safeHudColor(localPlayer && localPlayer.color, team === "seeker" ? "#ff7a7a" : "#7cff8a");
+  var depleted = this.sprintDepletedPenaltyActive && this.sprintStamina <= 0.01;
+  var fill = depleted ? "#ff3b3b" : accent;
+  var percent = Math.round(pc.math.clamp(this.sprintStamina, 0, 1) * 100);
+
+  this._sprintHud.style.borderColor = depleted ? "#ff3b3b" : accent;
+  this._sprintHud.innerHTML = "" +
+    "<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;'><span>Sprint</span><span>" + percent + "%</span></div>" +
+    "<div style='height:12px;border-radius:999px;background:rgba(255,255,255,0.16);overflow:hidden;'>" +
+      "<div style='height:100%;width:" + percent + "%;background:" + fill + ";box-shadow:0 0 10px " + fill + ";'></div>" +
+    "</div>";
+};
+
+LocalPlayerController.prototype._safeHudColor = function (value, fallback) {
+  return typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value) ? value : fallback;
+};
+
+LocalPlayerController.prototype._destroySprintHud = function () {
+  if (!this._sprintHud) {
+    return;
+  }
+
+  if (this._sprintHud.parentNode) {
+    this._sprintHud.parentNode.removeChild(this._sprintHud);
+  }
+  this._sprintHud = null;
 };
 
 LocalPlayerController.prototype._formatDebugVec3 = function (value) {
