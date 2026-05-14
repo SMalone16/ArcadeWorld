@@ -317,7 +317,12 @@ ArcadeNetworkClient.prototype._enableLocalControlScripts = function (localEntity
     }
   }
   if (scripts.firstPersonCamera) {
-    scripts.firstPersonCamera.enabled = true;
+    if (scripts.localPlayerController) {
+      scripts.firstPersonCamera.enabled = false;
+      console.warn("[ArcadeNetworkClient] LocalPlayerController owns camera; firstPersonCamera disabled to avoid mouselook jitter.");
+    } else {
+      scripts.firstPersonCamera.enabled = true;
+    }
   }
 };
 
