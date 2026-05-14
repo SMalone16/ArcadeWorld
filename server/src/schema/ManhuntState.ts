@@ -33,13 +33,31 @@ export class ManhuntState extends Schema {
   safeZoneRadius = 15;
 
   @type("number")
-  hiderStartX = 285;
+  hiderStartAX = 285;
 
   @type("number")
-  hiderStartY = 0.5;
+  hiderStartAY = 0.5;
 
   @type("number")
-  hiderStartZ = -88;
+  hiderStartAZ = -88;
+
+  @type("number")
+  hiderStartBX = 295;
+
+  @type("number")
+  hiderStartBY = 0.5;
+
+  @type("number")
+  hiderStartBZ = -88;
+
+  @type("number")
+  hiderStartCX = 275;
+
+  @type("number")
+  hiderStartCY = 0.5;
+
+  @type("number")
+  hiderStartCZ = -88;
 
   @type("number")
   seekerStartX = 276.6;

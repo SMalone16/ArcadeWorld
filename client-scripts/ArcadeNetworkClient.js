@@ -394,7 +394,9 @@ ArcadeNetworkClient.prototype._bindManhuntStateCallbacks = function ($) {
   var fields = [
     "phase", "timerSeconds", "roundNumber", "message", "startedBy",
     "safeZoneX", "safeZoneY", "safeZoneZ", "safeZoneRadius",
-    "hiderStartX", "hiderStartY", "hiderStartZ",
+    "hiderStartAX", "hiderStartAY", "hiderStartAZ",
+    "hiderStartBX", "hiderStartBY", "hiderStartBZ",
+    "hiderStartCX", "hiderStartCY", "hiderStartCZ",
     "seekerStartX", "seekerStartY", "seekerStartZ",
     "lobbySpawnX", "lobbySpawnY", "lobbySpawnZ"
   ];
@@ -556,6 +558,15 @@ ArcadeNetworkClient.prototype.sendManhuntTagRequest = function () {
   return true;
 };
 
+ArcadeNetworkClient.prototype.sendManhuntMapConfig = function (config) {
+  if (!this.room || !this.room.send) {
+    return false;
+  }
+
+  this.room.send("manhunt:mapConfig", config || {});
+  return true;
+};
+
 ArcadeNetworkClient.prototype.sendPlayerPositionCapture = function (payload) {
   if (!this.room || !this.room.send) {
     return false;
@@ -567,6 +578,10 @@ ArcadeNetworkClient.prototype.sendPlayerPositionCapture = function (payload) {
 
 ArcadeNetworkClient.prototype.onManhuntEvent = function (callback) {
   this.onEvent("manhuntEvent", callback);
+};
+
+ArcadeNetworkClient.prototype.onConnected = function (callback) {
+  this.onEvent("connected", callback);
 };
 
 ArcadeNetworkClient.prototype.getLocalPlayerProfile = function () {
@@ -650,9 +665,15 @@ ArcadeNetworkClient.prototype.getManhuntState = function () {
     safeZoneY: manhunt.safeZoneY || 0,
     safeZoneZ: manhunt.safeZoneZ || 0,
     safeZoneRadius: manhunt.safeZoneRadius || 0,
-    hiderStartX: manhunt.hiderStartX || 0,
-    hiderStartY: manhunt.hiderStartY || 0,
-    hiderStartZ: manhunt.hiderStartZ || 0,
+    hiderStartAX: manhunt.hiderStartAX || 0,
+    hiderStartAY: manhunt.hiderStartAY || 0,
+    hiderStartAZ: manhunt.hiderStartAZ || 0,
+    hiderStartBX: manhunt.hiderStartBX || 0,
+    hiderStartBY: manhunt.hiderStartBY || 0,
+    hiderStartBZ: manhunt.hiderStartBZ || 0,
+    hiderStartCX: manhunt.hiderStartCX || 0,
+    hiderStartCY: manhunt.hiderStartCY || 0,
+    hiderStartCZ: manhunt.hiderStartCZ || 0,
     seekerStartX: manhunt.seekerStartX || 0,
     seekerStartY: manhunt.seekerStartY || 0,
     seekerStartZ: manhunt.seekerStartZ || 0,
