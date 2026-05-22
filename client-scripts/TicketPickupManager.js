@@ -6,13 +6,300 @@ TicketPickupManager.attributes.add("ticketSpawnRoot", { type: "entity" });
 TicketPickupManager.attributes.add("ticketTemplate", { type: "entity" });
 TicketPickupManager.attributes.add("collectRadius", { type: "number", default: 2.2 });
 TicketPickupManager.attributes.add("collectSfx", { type: "asset", assetType: "audio" });
-TicketPickupManager.prototype.initialize = function () { this.networkClient=this.networkManagerEntity&&this.networkManagerEntity.script?this.networkManagerEntity.script.arcadeNetworkClient:null; this._ticketEntities={}; this._requested={}; this._fx=[]; this._spawnPositions=[]; this._hasSentSpawnConfig=false; if (!this.networkClient) console.warn("[Tickets] Missing ArcadeNetworkClient"); if (!this.ticketSpawnRoot) console.warn("[Tickets] Missing ticketSpawnRoot"); if (!this.ticketTemplate) console.warn("[Tickets] Missing ticketTemplate"); if (this.ticketTemplate) this.ticketTemplate.enabled=false; this._spawnPositions=this._collectSpawnPositions(); this._trySendSpawnConfig(); if (this.networkClient&&this.networkClient.onConnected) this.networkClient.onConnected(this._trySendSpawnConfig.bind(this)); if (this.networkClient&&this.networkClient.onTicketCollected) this.networkClient.onTicketCollected(this._onTicketCollected.bind(this)); };
-TicketPickupManager.prototype.update = function (dt) { this._trySendSpawnConfig(); this._syncTickets(); this._checkCollects(); this._updateFx(dt); };
-TicketPickupManager.prototype._collectSpawnPositions = function () { var out=[]; var kids=this.ticketSpawnRoot?this.ticketSpawnRoot.children:[]; for (var i=0;i<kids.length;i++){ if(kids[i]&&kids[i].enabled){ var p=kids[i].getPosition(); out.push({x:p.x,y:p.y,z:p.z}); } } console.log("[Tickets] Spawn config positions", out.length); return out; };
-TicketPickupManager.prototype._trySendSpawnConfig = function () { if (this._hasSentSpawnConfig) return; var hasNetworkClient=!!this.networkClient; var hasRoom=!!(this.networkClient&&this.networkClient.room); var spawnCount=this._spawnPositions?this._spawnPositions.length:0; console.log("[Tickets] Spawn send check | networkClient:",hasNetworkClient,"| room:",hasRoom,"| positions:",spawnCount); if (!this.networkClient) return; if (spawnCount!==16) return; var sent=this.networkClient.sendTicketSpawnConfig?this.networkClient.sendTicketSpawnConfig(this._spawnPositions):false; if (sent){ this._hasSentSpawnConfig=true; console.log("[Tickets] Spawn config send success:",this._hasSentSpawnConfig); } else console.log("[Tickets] Waiting for room connection before sending spawn config"); };
-TicketPickupManager.prototype._syncTickets = function () { if (!this.networkClient) return; var tickets=this.networkClient.getTicketsState?this.networkClient.getTicketsState():{}; console.log("[Tickets] Known tickets:",Object.keys(tickets).length); for (var id in tickets){ if (!Object.prototype.hasOwnProperty.call(tickets,id)) continue; var t=tickets[id]; var ent=this._ticketEntities[id]; if(!ent && this.ticketTemplate){ ent=this.ticketTemplate.clone(); ent.enabled=true; this.app.root.addChild(ent); this._ticketEntities[id]=ent; } if(!ent) continue; ent.setPosition(t.x,t.y,t.z); ent.enabled=t.active===true; }
+TicketPickupManager.attributes.add("showDebugOverlay", {
+    type: "boolean",
+    default: true,
+    title: "Show Ticket Debug Overlay"
+});
+
+TicketPickupManager.prototype.initialize = function () {
+    this.networkClient = this.networkManagerEntity && this.networkManagerEntity.script ? this.networkManagerEntity.script.arcadeNetworkClient : null;
+    this._ticketEntities = {};
+    this._requested = {};
+    this._fx = [];
+
+    this._spawnPositions = [];
+    this._hasSentSpawnConfig = false;
+    this._lastSpawnSendResult = "not attempted";
+    this._lastWarning = "";
+    this._debugOverlay = null;
+    this._debugEnabled = true;
+
+    if (!this.networkClient) {
+        this._setWarning("Missing ArcadeNetworkClient");
+    }
+    if (!this.ticketSpawnRoot) {
+        this._setWarning("Missing ticketSpawnRoot");
+    }
+    if (!this.ticketTemplate) {
+        this._setWarning("Missing ticketTemplate");
+    }
+
+    if (this.ticketTemplate) {
+        this.ticketTemplate.enabled = false;
+    }
+
+    this._spawnPositions = this._collectSpawnPositions();
+    this._trySendSpawnConfig();
+
+    if (this.networkClient && this.networkClient.onConnected) {
+        this.networkClient.onConnected(this._trySendSpawnConfig.bind(this));
+    }
+    if (this.networkClient && this.networkClient.onTicketCollected) {
+        this.networkClient.onTicketCollected(this._onTicketCollected.bind(this));
+    }
+
+    this._onDebugKeyDownBound = this._onDebugKeyDown.bind(this);
+    if (typeof window !== "undefined" && window.addEventListener) {
+        window.addEventListener("keydown", this._onDebugKeyDownBound);
+    }
 };
-TicketPickupManager.prototype._checkCollects = function () { var local=this.localPlayerEntity; if(!local||!this.networkClient||!this.networkClient.sendTicketCollectRequest) return; var lp=local.getPosition(); var tickets=this.networkClient.getTicketsState?this.networkClient.getTicketsState():{}; for (var id in tickets){ var t=tickets[id]; if(!t.active||this._requested[id]) continue; var dx=lp.x-t.x,dy=lp.y-t.y,dz=lp.z-t.z; if (Math.sqrt(dx*dx+dy*dy+dz*dz)<=this.collectRadius){ this._requested[id]=true; this.networkClient.sendTicketCollectRequest(id); } } };
-TicketPickupManager.prototype._onTicketCollected = function (payload) { if(!payload||!payload.ticketId) return; delete this._requested[payload.ticketId]; if (this.collectSfx && this.entity.sound) { this.entity.sound.play(this.collectSfx.name); } this._spawnFx(payload.x,payload.y,payload.z); };
-TicketPickupManager.prototype._spawnFx = function (x,y,z) { for (var i=0;i<8;i++){ var e=new pc.Entity("ticketFx"); e.addComponent("render",{type:"sphere"}); e.setLocalScale(0.12,0.12,0.12); e.setPosition(x,y+0.5,z); this.app.root.addChild(e); this._fx.push({e:e,v:new pc.Vec3((Math.random()-0.5)*2,Math.random()*2+1,(Math.random()-0.5)*2),life:0.8}); } };
-TicketPickupManager.prototype._updateFx = function (dt) { for (var i=this._fx.length-1;i>=0;i--){ var f=this._fx[i]; f.life-=dt; f.e.translate(f.v.x*dt,f.v.y*dt,f.v.z*dt); var s=Math.max(0.01,f.life); f.e.setLocalScale(s,s,s); if(f.life<=0){ f.e.destroy(); this._fx.splice(i,1);} } };
+
+TicketPickupManager.prototype.update = function (dt) {
+    this._trySendSpawnConfig();
+    this._syncTickets();
+    this._checkCollects();
+    this._updateFx(dt);
+    this._updateDebugOverlay();
+};
+
+TicketPickupManager.prototype.destroy = function () {
+    if (this._onDebugKeyDownBound && typeof window !== "undefined" && window.removeEventListener) {
+        window.removeEventListener("keydown", this._onDebugKeyDownBound);
+    }
+    this._removeDebugOverlay();
+};
+
+TicketPickupManager.prototype._setWarning = function (message) {
+    this._lastWarning = message;
+    console.warn("[Tickets] " + message);
+};
+
+TicketPickupManager.prototype._collectSpawnPositions = function () {
+    var out = [];
+    var kids = this.ticketSpawnRoot ? this.ticketSpawnRoot.children : [];
+    for (var i = 0; i < kids.length; i++) {
+        if (kids[i] && kids[i].enabled) {
+            var p = kids[i].getPosition();
+            out.push({ x: p.x, y: p.y, z: p.z });
+        }
+    }
+    console.log("[Tickets] Spawn positions found: " + out.length);
+    return out;
+};
+
+TicketPickupManager.prototype._trySendSpawnConfig = function () {
+    if (this._hasSentSpawnConfig) {
+        return;
+    }
+
+    if (!this.networkClient) {
+        this._lastSpawnSendResult = "missing network client";
+        this._setWarning("Missing ArcadeNetworkClient");
+        return;
+    }
+
+    var spawnCount = this._spawnPositions ? this._spawnPositions.length : 0;
+    if (spawnCount !== 16) {
+        this._lastSpawnSendResult = "invalid spawn count";
+        this._setWarning("Expected 16 spawn positions, found " + spawnCount);
+        return;
+    }
+
+    if (!this.networkClient.room) {
+        this._lastSpawnSendResult = "waiting for room";
+        this._setWarning("Waiting for Colyseus room before sending ticket spawn config");
+        console.log("[Tickets] Waiting for room connection...");
+        return;
+    }
+
+    console.log("[Tickets] Room ready; sending spawn config...");
+    var sent = this.networkClient.sendTicketSpawnConfig ? this.networkClient.sendTicketSpawnConfig(this._spawnPositions) : false;
+    this._lastSpawnSendResult = sent ? "true" : "false";
+
+    if (sent) {
+        this._hasSentSpawnConfig = true;
+        this._lastWarning = "";
+        console.log("[Tickets] Spawn config sent successfully.");
+    } else {
+        this._setWarning("sendTicketSpawnConfig returned false");
+    }
+};
+
+TicketPickupManager.prototype._syncTickets = function () {
+    if (!this.networkClient) {
+        return;
+    }
+
+    var tickets = this.networkClient.getTicketsState ? this.networkClient.getTicketsState() : {};
+    var ids = Object.keys(tickets);
+    var activeCount = 0;
+
+    for (var id in tickets) {
+        if (!Object.prototype.hasOwnProperty.call(tickets, id)) {
+            continue;
+        }
+
+        var t = tickets[id];
+        var ent = this._ticketEntities[id];
+
+        if (!ent && this.ticketTemplate) {
+            ent = this.ticketTemplate.clone();
+            ent.enabled = true;
+            this.app.root.addChild(ent);
+            this._ticketEntities[id] = ent;
+            console.log("[Tickets] Cloned ticket entity for " + id + " at " + t.x + "," + t.y + "," + t.z);
+        }
+
+        if (!ent) {
+            continue;
+        }
+
+        ent.setPosition(t.x, t.y, t.z);
+        ent.enabled = t.active === true;
+
+        if (t.active === true) {
+            activeCount += 1;
+        }
+    }
+
+    console.log("[Tickets] Known tickets: " + ids.length + " active: " + activeCount + " cloned: " + Object.keys(this._ticketEntities).length);
+};
+
+TicketPickupManager.prototype._checkCollects = function () {
+    var local = this.localPlayerEntity;
+    if (!local || !this.networkClient || !this.networkClient.sendTicketCollectRequest) return;
+    var lp = local.getPosition();
+    var tickets = this.networkClient.getTicketsState ? this.networkClient.getTicketsState() : {};
+    for (var id in tickets) {
+        var t = tickets[id];
+        if (!t.active || this._requested[id]) continue;
+        var dx = lp.x - t.x, dy = lp.y - t.y, dz = lp.z - t.z;
+        if (Math.sqrt(dx * dx + dy * dy + dz * dz) <= this.collectRadius) {
+            this._requested[id] = true;
+            this.networkClient.sendTicketCollectRequest(id);
+        }
+    }
+};
+
+TicketPickupManager.prototype._onTicketCollected = function (payload) {
+    if (!payload || !payload.ticketId) return;
+    delete this._requested[payload.ticketId];
+    if (this.collectSfx && this.entity.sound) {
+        this.entity.sound.play(this.collectSfx.name);
+    }
+    this._spawnFx(payload.x, payload.y, payload.z);
+};
+
+TicketPickupManager.prototype._spawnFx = function (x, y, z) {
+    for (var i = 0; i < 8; i++) {
+        var e = new pc.Entity("ticketFx");
+        e.addComponent("render", { type: "sphere" });
+        e.setLocalScale(0.12, 0.12, 0.12);
+        e.setPosition(x, y + 0.5, z);
+        this.app.root.addChild(e);
+        this._fx.push({
+            e: e,
+            v: new pc.Vec3((Math.random() - 0.5) * 2, Math.random() * 2 + 1, (Math.random() - 0.5) * 2),
+            life: 0.8
+        });
+    }
+};
+
+TicketPickupManager.prototype._updateFx = function (dt) {
+    for (var i = this._fx.length - 1; i >= 0; i--) {
+        var f = this._fx[i];
+        f.life -= dt;
+        f.e.translate(f.v.x * dt, f.v.y * dt, f.v.z * dt);
+        var s = Math.max(0.01, f.life);
+        f.e.setLocalScale(s, s, s);
+        if (f.life <= 0) {
+            f.e.destroy();
+            this._fx.splice(i, 1);
+        }
+    }
+};
+
+TicketPickupManager.prototype._updateDebugOverlay = function () {
+    if (typeof document === "undefined") {
+        return;
+    }
+
+    var shouldShow = this._debugEnabled && this.showDebugOverlay;
+    if (!shouldShow) {
+        this._removeDebugOverlay();
+        return;
+    }
+
+    if (!this._debugOverlay) {
+        this._debugOverlay = document.createElement("pre");
+        this._debugOverlay.style.position = "fixed";
+        this._debugOverlay.style.top = "8px";
+        this._debugOverlay.style.left = "8px";
+        this._debugOverlay.style.zIndex = "9999";
+        this._debugOverlay.style.margin = "0";
+        this._debugOverlay.style.padding = "8px";
+        this._debugOverlay.style.background = "rgba(0,0,0,0.7)";
+        this._debugOverlay.style.color = "#9ef59e";
+        this._debugOverlay.style.font = "12px/1.3 monospace";
+        this._debugOverlay.style.maxWidth = "420px";
+        this._debugOverlay.style.pointerEvents = "none";
+        document.body.appendChild(this._debugOverlay);
+    }
+
+    var tickets = this.networkClient && this.networkClient.getTicketsState ? this.networkClient.getTicketsState() : {};
+    var ticketIds = Object.keys(tickets);
+    var activeCount = 0;
+    for (var i = 0; i < ticketIds.length; i++) {
+        if (tickets[ticketIds[i]] && tickets[ticketIds[i]].active) {
+            activeCount += 1;
+        }
+    }
+
+    var lines = [];
+    lines.push("[Ticket Debug]");
+    lines.push("Network Client: " + (this.networkClient ? "yes" : "no"));
+    lines.push("Room Connected: " + (this.networkClient && this.networkClient.room ? "yes" : "no"));
+    lines.push("Session ID: " + (this.networkClient && this.networkClient.room && this.networkClient.room.sessionId ? this.networkClient.room.sessionId : "n/a"));
+    lines.push("Spawn Root assigned: " + (this.ticketSpawnRoot ? "yes" : "no"));
+    lines.push("Spawn Positions Found: " + (this._spawnPositions ? this._spawnPositions.length : 0));
+    lines.push("Ticket Template assigned: " + (this.ticketTemplate ? "yes" : "no"));
+    lines.push("Spawn Config Sent: " + (this._hasSentSpawnConfig ? "yes" : "no"));
+    lines.push("Last Spawn Send Result: " + this._lastSpawnSendResult);
+    lines.push("Known Server Tickets: " + ticketIds.length);
+    lines.push("Active Server Tickets: " + activeCount);
+    lines.push("Cloned Ticket Entity count: " + Object.keys(this._ticketEntities).length);
+    lines.push("Last Warning: " + (this._lastWarning || "none"));
+    lines.push("Ticket IDs: " + (ticketIds.length ? ticketIds.slice(0, 6).join(", ") : "none"));
+    this._debugOverlay.textContent = lines.join("\n");
+};
+
+TicketPickupManager.prototype._removeDebugOverlay = function () {
+    if (this._debugOverlay && this._debugOverlay.parentNode) {
+        this._debugOverlay.parentNode.removeChild(this._debugOverlay);
+    }
+    this._debugOverlay = null;
+};
+
+TicketPickupManager.prototype._onDebugKeyDown = function (evt) {
+    if (!evt || evt.repeat) {
+        return;
+    }
+
+    if (evt.key === "t" || evt.key === "T") {
+        var tickets = this.networkClient && this.networkClient.getTicketsState ? this.networkClient.getTicketsState() : {};
+        console.log("[Tickets] Debug snapshot", {
+            spawnPositions: this._spawnPositions,
+            knownTickets: tickets,
+            ticketEntities: Object.keys(this._ticketEntities),
+            roomState: {
+                hasNetworkClient: !!this.networkClient,
+                hasRoom: !!(this.networkClient && this.networkClient.room),
+                sessionId: this.networkClient && this.networkClient.room ? this.networkClient.room.sessionId : null
+            },
+            hasSentSpawnConfig: this._hasSentSpawnConfig,
+            lastSpawnSendResult: this._lastSpawnSendResult,
+            lastWarning: this._lastWarning
+        });
+    }
+};
