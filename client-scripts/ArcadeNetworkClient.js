@@ -63,7 +63,9 @@ ArcadeNetworkClient.prototype.initialize = function () {
     remoteUpdated: [],
     remoteRemoved: [],
     manhuntEvent: [],
-    manhuntStateChanged: []
+    manhuntStateChanged: [],
+    ticketCollected: [],
+    ticketLeaderboardChanged: []
   };
 
   this.sessionId = null;
@@ -82,6 +84,10 @@ ArcadeNetworkClient.prototype.initialize = function () {
   this._isOfflineMode = false;
   this._isConnecting = false;
   this.selectedProfile = null;
+  this._storageKeys = { deviceId: "arcadeWorld.deviceId", tickets: "arcadeWorld.savedTickets" };
+  this._deviceId = this._loadOrCreateDeviceId();
+  this._localTickets = this._loadSavedTickets();
+  this._knownTickets = {};
 
   var cfg = window.ArcadeConfig || {};
   this._serverUrl = this.serverUrl || cfg.SERVER_URL || "";
@@ -164,6 +170,8 @@ ArcadeNetworkClient.prototype.connectWithProfile = async function (profile) {
   this.selectedProfile = this._sanitizeProfile(profile);
   window.ArcadePlayerProfile = this.selectedProfile;
   this.app.arcadePlayerProfile = this.selectedProfile;
+  this.selectedProfile.savedTickets = this._localTickets;
+  this.selectedProfile.deviceId = this._deviceId;
   console.log("[ArcadeNetworkClient] connectWithProfile using", this.selectedProfile);
   return this._connect();
 };
@@ -180,7 +188,8 @@ ArcadeNetworkClient.prototype._setGameState = function (state) {
 ArcadeNetworkClient.prototype._connect = async function () {
   if (this.room || this._isConnecting) {
     if (this.room && this.selectedProfile) {
-      this._sendProfile();
+      if (this.selectedProfile) { this.selectedProfile.savedTickets = this._localTickets; this.selectedProfile.deviceId = this._deviceId; }
+  this._sendProfile();
       this._applyLocalProfile();
     }
     return this.room;
@@ -212,10 +221,12 @@ ArcadeNetworkClient.prototype._connect = async function () {
   console.log("[ArcadeNetworkClient] Joined room", this._roomName, this.sessionId);
   this._emit("connected", { sessionId: this.sessionId });
 
+  if (this.selectedProfile) { this.selectedProfile.savedTickets = this._localTickets; this.selectedProfile.deviceId = this._deviceId; }
   this._sendProfile();
   this._spawnLocalPlayer();
   this._bindStateListeners();
   this._bindManhuntMessages();
+  this._bindTicketCollectionMessages();
 
   this.room.onStateChange(function () {
     if (!this._hasBoundPlayers) {
@@ -339,6 +350,7 @@ ArcadeNetworkClient.prototype._bindStateListeners = function () {
   }
 
   this._bindManhuntStateCallbacks($);
+  this._bindTicketStateCallbacks($);
   this._hasBoundPlayers = true;
 
   stateCallbacks.players.onAdd(function (player, sessionId) {
@@ -371,6 +383,14 @@ ArcadeNetworkClient.prototype._bindStateListeners = function () {
     playerCallbacks.listen("totalPoints", emitPlayerUpdate);
     playerCallbacks.listen("isInManhuntRound", emitPlayerUpdate);
     playerCallbacks.listen("serverTeleportId", emitPlayerUpdate);
+    playerCallbacks.listen("tickets", function () {
+      if (sessionId === self.sessionId) {
+        self._localTickets = Math.max(0, Math.floor(player.tickets || 0));
+        self._saveTickets(self._localTickets);
+      }
+      emitPlayerUpdate();
+      self._emit("ticketLeaderboardChanged", self.getTicketLeaderboard());
+    });
   });
 
   stateCallbacks.players.onRemove(function (_player, sessionId) {
@@ -453,7 +473,8 @@ ArcadeNetworkClient.prototype._toPlayerPayload = function (player, sessionId) {
     manhuntPoints: player.manhuntPoints || 0,
     totalPoints: player.totalPoints || 0,
     isInManhuntRound: player.isInManhuntRound === true,
-    serverTeleportId: player.serverTeleportId || 0
+    serverTeleportId: player.serverTeleportId || 0,
+    tickets: player.tickets || 0
   };
 };
 
@@ -729,6 +750,41 @@ ArcadeNetworkClient.prototype.isManhuntActive = function () {
 ArcadeNetworkClient.prototype.onManhuntStateChanged = function (callback) {
   this.onEvent("manhuntStateChanged", callback);
 };
+
+ArcadeNetworkClient.prototype._bindTicketCollectionMessages = function () {
+  if (!this.room || !this.room.onMessage || this._hasBoundTicketMessages) return;
+  this._hasBoundTicketMessages = true;
+  this.room.onMessage("tickets:collected", function (payload) {
+    if (payload && typeof payload.tickets === "number") { this._localTickets = Math.max(0, Math.floor(payload.tickets)); this._saveTickets(this._localTickets); }
+    this._emit("ticketCollected", payload || {});
+    this._emit("ticketLeaderboardChanged", this.getTicketLeaderboard());
+  }.bind(this));
+};
+
+
+ArcadeNetworkClient.prototype._bindTicketStateCallbacks = function ($) {
+  if (!this.room || !this.room.state || !this.room.state.tickets) return;
+  var self = this;
+  var stateCallbacks = $(this.room.state);
+  if (!stateCallbacks || !stateCallbacks.tickets) return;
+  stateCallbacks.tickets.onAdd(function (ticket, ticketId) {
+    self._knownTickets[ticketId] = ticket;
+    var ticketCallbacks = $(ticket);
+    var emitChange = function () { self._emit("ticketLeaderboardChanged", self.getTicketLeaderboard()); };
+    ticketCallbacks.listen("active", emitChange); ticketCallbacks.listen("x", emitChange); ticketCallbacks.listen("y", emitChange); ticketCallbacks.listen("z", emitChange); ticketCallbacks.listen("spawnIndex", emitChange); ticketCallbacks.listen("version", emitChange);
+  });
+  stateCallbacks.tickets.onRemove(function (_ticket, ticketId) { delete self._knownTickets[ticketId]; });
+};
+ArcadeNetworkClient.prototype.sendTicketSpawnConfig = function (spawnPositions) { if (!this.room) return false; this.room.send("tickets:spawnConfig", { positions: spawnPositions || [] }); return true; };
+ArcadeNetworkClient.prototype.sendTicketCollectRequest = function (ticketId) { if (!this.room || !ticketId) return false; this.room.send("tickets:collectRequest", { ticketId: ticketId }); return true; };
+ArcadeNetworkClient.prototype.getTicketLeaderboard = function () { var rows=[]; for (var id in this._knownPlayers) { if (Object.prototype.hasOwnProperty.call(this._knownPlayers,id)) { var p=this._toPlayerPayload(this._knownPlayers[id],id); rows.push({ sessionId:id, name:p.name||("Player "+id.slice(0,4)), tickets:p.tickets||0, isLocal:id===this.sessionId }); } } rows.sort(function(a,b){ return b.tickets-a.tickets; }); return rows; };
+ArcadeNetworkClient.prototype.getLocalTickets = function () { return this._localTickets || 0; };
+ArcadeNetworkClient.prototype.onTicketCollected = function (callback) { this.onEvent("ticketCollected", callback); };
+ArcadeNetworkClient.prototype.onTicketLeaderboardChanged = function (callback) { this.onEvent("ticketLeaderboardChanged", callback); };
+ArcadeNetworkClient.prototype.getTicketsState = function () { var out={}; for (var id in this._knownTickets) { var t=this._knownTickets[id]; out[id]={ id:id, x:t.x||0, y:t.y||0, z:t.z||0, spawnIndex:t.spawnIndex||0, active:t.active===true, version:t.version||0 }; } return out; };
+ArcadeNetworkClient.prototype._loadOrCreateDeviceId = function () { try { var key=this._storageKeys.deviceId; var id=window.localStorage.getItem(key); if (id) return id; id="dev-"+Math.random().toString(36).slice(2,12); window.localStorage.setItem(key,id); console.log("[Tickets] Created local deviceId", id); return id; } catch (_err) { return "dev-ephemeral"; } };
+ArcadeNetworkClient.prototype._loadSavedTickets = function () { try { var raw=window.localStorage.getItem(this._storageKeys.tickets); var n=Math.max(0, Math.floor(Number(raw||0))); console.log("[Tickets] Loaded local saved tickets", n); return n; } catch (_err) { return 0; } };
+ArcadeNetworkClient.prototype._saveTickets = function (count) { try { window.localStorage.setItem(this._storageKeys.tickets, String(Math.max(0, Math.floor(count||0)))); console.log("[Tickets] Saved local tickets", count); } catch (_err) {} };
 
 ArcadeNetworkClient.prototype.update = function () {
   this._updateMovementDebugHud();

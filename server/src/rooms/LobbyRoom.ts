@@ -1,6 +1,7 @@
 import { Client, Room } from "@colyseus/core";
 import { ArcadeWorldState } from "../schema/ArcadeWorldState.js";
 import { PlayerState } from "../schema/PlayerState.js";
+import { TicketPickupState } from "../schema/TicketPickupState.js";
 
 type MovementMessage = {
   x: number;
@@ -15,9 +16,20 @@ type ProfileMessage = {
   name?: string;
   color?: string;
   hatId?: string;
+  savedTickets?: number;
+  deviceId?: string;
 };
 
 type Vec3 = { x: number; y: number; z: number };
+
+type TicketSpawnConfigMessage = { positions?: Vec3[] | null };
+type TicketCollectRequestMessage = { ticketId?: string };
+
+const TICKET_SPAWN_COUNT = 16;
+const TICKET_ACTIVE_COUNT = 10;
+const TICKET_COLLECT_DISTANCE = 2.5;
+const TICKET_RESPAWN_MIN_MS = 5000;
+const TICKET_RESPAWN_MAX_MS = 10000;
 
 type ManhuntMapConfigMessage = {
   safeZone?: (Vec3 & { radius?: number }) | null;
@@ -151,6 +163,8 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
   maxClients = 64;
 
   private lastRoundTeams = new Map<string, ManhuntTeam>();
+  private ticketSpawnPositions: Vec3[] = [];
+  private ticketRespawnTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   static logManhuntStartupConfig(): void {
     console.log(
@@ -180,6 +194,15 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
       player.name = sanitizeName(message?.name, player.name);
       player.color = sanitizeColor(message?.color, player.color);
       player.hatId = sanitizeHatId(message?.hatId, player.hatId);
+      player.tickets = this.sanitizeTicketCount(message?.savedTickets, player.tickets);
+    });
+
+    this.onMessage("tickets:spawnConfig", (client, message: TicketSpawnConfigMessage) => {
+      this.handleTicketSpawnConfig(client, message);
+    });
+
+    this.onMessage("tickets:collectRequest", (client, message: TicketCollectRequestMessage) => {
+      this.handleTicketCollectRequest(client, message);
     });
 
     this.onMessage("manhunt:startRequest", (client) => {
@@ -269,6 +292,7 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     player.z = Math.random() * 4 - 2;
     player.rotY = 0;
     this.resetPlayerManhuntFields(player, false);
+    player.tickets = 0;
 
     this.state.players.set(client.sessionId, player);
     console.log(`[LobbyRoom] join ${client.sessionId}`);
@@ -284,6 +308,8 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
   }
 
   onDispose(): void {
+    for (const timer of this.ticketRespawnTimers.values()) clearTimeout(timer);
+    this.ticketRespawnTimers.clear();
     console.log("[LobbyRoom] disposed");
   }
 
@@ -957,5 +983,80 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     return player
       ? `${player.name} (${sessionId.slice(0, 4)})`
       : sessionId.slice(0, 4);
+  }
+
+  private sanitizeTicketCount(value: unknown, fallback = 0): number {
+    if (!Number.isFinite(value as number)) return fallback;
+    return Math.max(0, Math.floor(value as number));
+  }
+
+  private handleTicketSpawnConfig(client: Client, message: TicketSpawnConfigMessage): void {
+    if (this.ticketSpawnPositions.length > 0) return;
+    const positions = message?.positions;
+    if (!Array.isArray(positions) || positions.length !== TICKET_SPAWN_COUNT || positions.some((p) => !isFiniteVec3(p))) {
+      console.warn(`[Tickets] Invalid spawn config from ${client.sessionId}`);
+      return;
+    }
+    this.ticketSpawnPositions = positions.map(copyVec3);
+    console.log(`[Tickets] Accepted spawn config with ${positions.length} positions.`);
+    this.seedInitialTickets();
+  }
+
+  private seedInitialTickets(): void {
+    const shuffled = [...Array(TICKET_SPAWN_COUNT).keys()].sort(() => Math.random() - 0.5);
+    for (let i = 0; i < TICKET_ACTIVE_COUNT; i++) {
+      const spawnIndex = shuffled[i];
+      const pos = this.ticketSpawnPositions[spawnIndex];
+      const ticket = new TicketPickupState();
+      ticket.id = `ticket-${i}`;
+      ticket.spawnIndex = spawnIndex;
+      ticket.x = pos.x; ticket.y = pos.y; ticket.z = pos.z;
+      ticket.active = true;
+      ticket.version = 1;
+      this.state.tickets.set(ticket.id, ticket);
+    }
+    console.log('[Tickets] Spawned 10 active tickets.');
+  }
+
+  private handleTicketCollectRequest(client: Client, message: TicketCollectRequestMessage): void {
+    const player = this.state.players.get(client.sessionId);
+    const ticket = message?.ticketId ? this.state.tickets.get(message.ticketId) : undefined;
+    if (!player || !ticket || !ticket.active) return;
+    const playerPos = { x: player.x, y: player.y, z: player.z };
+    const ticketPos = { x: ticket.x, y: ticket.y, z: ticket.z };
+    if (distance(playerPos, ticketPos) > TICKET_COLLECT_DISTANCE) return;
+    ticket.active = false;
+    ticket.version += 1;
+    player.tickets += 1;
+    console.log(`[Tickets] ${client.sessionId} collected ${ticket.id} -> ${player.tickets}`);
+    client.send('tickets:collected', { ticketId: ticket.id, x: ticket.x, y: ticket.y, z: ticket.z, tickets: player.tickets });
+    this.scheduleTicketRespawn(ticket.id);
+  }
+
+  private scheduleTicketRespawn(ticketId: string): void {
+    const existing = this.ticketRespawnTimers.get(ticketId);
+    if (existing) clearTimeout(existing);
+    const delay = TICKET_RESPAWN_MIN_MS + Math.floor(Math.random() * (TICKET_RESPAWN_MAX_MS - TICKET_RESPAWN_MIN_MS + 1));
+    const timer = setTimeout(() => {
+      this.ticketRespawnTimers.delete(ticketId);
+      this.respawnTicket(ticketId);
+    }, delay);
+    this.ticketRespawnTimers.set(ticketId, timer);
+    console.log(`[Tickets] Respawn scheduled for ${ticketId} in ${delay}ms`);
+  }
+
+  private respawnTicket(ticketId: string): void {
+    const ticket = this.state.tickets.get(ticketId);
+    if (!ticket || this.ticketSpawnPositions.length !== TICKET_SPAWN_COUNT) return;
+    const used = new Set<number>();
+    this.state.tickets.forEach((t) => { if (t.active) used.add(t.spawnIndex); });
+    if (used.size >= TICKET_ACTIVE_COUNT) return;
+    const empty: number[] = [];
+    for (let i=0;i<TICKET_SPAWN_COUNT;i++) if (!used.has(i)) empty.push(i);
+    if (empty.length === 0) return;
+    const spawnIndex = empty[Math.floor(Math.random() * empty.length)];
+    const pos = this.ticketSpawnPositions[spawnIndex];
+    ticket.spawnIndex = spawnIndex; ticket.x = pos.x; ticket.y = pos.y; ticket.z = pos.z; ticket.active = true; ticket.version += 1;
+    console.log(`[Tickets] Respawned ${ticketId} at spawn ${spawnIndex}`);
   }
 }

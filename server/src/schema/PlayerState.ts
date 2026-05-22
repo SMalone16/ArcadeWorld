@@ -46,4 +46,7 @@ export class PlayerState extends Schema {
 
   @type("number")
   serverTeleportId = 0;
+
+  @type("number")
+  tickets = 0;
 }
