@@ -134,7 +134,5 @@ Use `ws://localhost:2567` in `ArcadeConfig.js`.
 
 ## Notes for teachers
 
-- You do **not** need Unity.
-- You do **not** need a desktop IDE.
 - PlayCanvas scene visuals remain managed in PlayCanvas Editor.
 - Codespaces is for **today's testing workflow**, not long-term production hosting.
