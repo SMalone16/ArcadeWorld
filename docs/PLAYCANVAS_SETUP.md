@@ -156,10 +156,12 @@ Manhunt uses a hybrid classroom-playtest model: local movement is client-authori
 
 - Attach `ManhuntManager.js` to a `GameModeManager` entity or to the existing `NetworkManager` entity.
   - Assign `networkManagerEntity`, `remotePlayerManagerEntity`, `localPlayerEntity`, `safeZoneEntity`, `mainCameraEntity`, and `spectatorCameraEntity` in the Editor.
+  - Optional: assign `tagSfxEntity` to an entity with a **Sound** component and a sound slot named `tagPop` for server-confirmed tag pop audio.
   - The `safeZoneEntity` field must point to the actual visible SafeZone/Home Base entity, not the `GameModeManager` entity.
   - The `mainCameraEntity` should be the normal local gameplay camera. The `spectatorCameraEntity` should be a separate camera looking at Home Base and should start disabled.
   - The client-side safe-zone check is only immediate feedback for pressing **M** outside Home Base; the server still enforces the real start restriction from server-tracked player positions.
-  - The Manhunt UI is state-driven and renders separate layers: center overlay, bottom role badge, top-right task panel, top-center timer, scoreboard overlay, and spectator overlay.
+  - The Manhunt UI is state-driven and renders separate layers: center overlay, bottom role badge, top-right task panel, top-center timer, scoreboard overlay, spectator overlay, plus an automatic bottom-left action feed (last 5 round actions).
+  - Tagged players also get a 2-second personal center-screen message ("You were tagged by ...") driven by server action events.
   - The center overlay is intentionally short-lived: it appears for team reveal, spawn countdown, feedback, and round-over results, then disappears during the active round.
 - Attach `ManhuntMapConfig.js` to the same `GameModeManager` entity to send PlayCanvas marker positions to the server while the room is still in the Manhunt `lobby` phase.
   - This is a dev/classroom bridge only. Production server-authoritative games should use a trusted shared map config file or server-loaded map data instead of trusting a client-sent config.

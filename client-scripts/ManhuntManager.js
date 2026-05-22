@@ -9,6 +9,7 @@ ManhuntManager.attributes.add("safeZoneEntity", { type: "entity", title: "Safe Z
 ManhuntManager.attributes.add("safeZoneRadius", { type: "number", default: 15, min: 0, title: "Safe Zone Radius" });
 ManhuntManager.attributes.add("mainCameraEntity", { type: "entity", title: "Main Camera Entity" });
 ManhuntManager.attributes.add("spectatorCameraEntity", { type: "entity", title: "Spectator Camera Entity" });
+ManhuntManager.attributes.add("tagSfxEntity", { type: "entity", title: "Tag SFX Entity (optional)" });
 
 ManhuntManager.prototype.initialize = function () {
   this.networkClient = this._resolveScript(this.networkManagerEntity, "arcadeNetworkClient");
@@ -18,6 +19,10 @@ ManhuntManager.prototype.initialize = function () {
   this._feedbackText = "";
   this._feedbackTimeRemaining = 0;
   this._scoreboardToggled = false;
+  this._actionFeed = [];
+  this._personalMessage = "";
+  this._personalMessageTimeRemaining = 0;
+  this._tagParticles = [];
   this._spectatorActive = false;
   this._hiddenVisuals = [];
   this._lastLoggedPhase = "";
@@ -40,6 +45,11 @@ ManhuntManager.prototype.update = function (dt) {
     this._feedbackTimeRemaining = Math.max(0, this._feedbackTimeRemaining - dt);
     if (this._feedbackTimeRemaining === 0) this._feedbackText = "";
   }
+  if (this._personalMessageTimeRemaining > 0) {
+    this._personalMessageTimeRemaining = Math.max(0, this._personalMessageTimeRemaining - dt);
+    if (this._personalMessageTimeRemaining === 0) this._personalMessage = "";
+  }
+  this._updateTagParticles(dt);
 
   this._applySpectatorState();
   this._renderUi();
@@ -104,6 +114,28 @@ ManhuntManager.prototype._bindNetworkEvents = function () {
   if (this.networkClient.onManhuntEvent) {
     this.networkClient.onManhuntEvent(this._onManhuntFeedback.bind(this));
   }
+  if (this.networkClient.onManhuntAction) {
+    this.networkClient.onManhuntAction(this._onManhuntAction.bind(this));
+  }
+};
+
+ManhuntManager.prototype._onManhuntAction = function (event) {
+  if (!event || !event.message) return;
+  this._actionFeed.unshift(event);
+  if (this._actionFeed.length > 5) this._actionFeed.length = 5;
+
+  var localId = this._getLocalPlayerId();
+  if (event.type === "tagged" && event.targetId && localId && event.targetId === localId) {
+    this._personalMessage = "You were tagged by " + (event.actorName || "another seeker");
+    this._personalMessageTimeRemaining = 2;
+  }
+
+  if (event.type === "tagged") {
+    this._playTagSfx();
+    this._spawnTagPop(event);
+  }
+
+  this._renderUi();
 };
 
 ManhuntManager.prototype._onServerManhuntStateChanged = function (state) {
@@ -190,7 +222,9 @@ ManhuntManager.prototype._createUiLayers = function () {
     topRightTaskPanel: this._createLayer("Manhunt task", "topRight"),
     topCenterTimer: this._createLayer("Manhunt timer", "topCenter"),
     scoreboardOverlay: this._createLayer("Manhunt scoreboard", "scoreboard"),
-    spectatorOverlay: this._createLayer("Manhunt spectator message", "spectator")
+    spectatorOverlay: this._createLayer("Manhunt spectator message", "spectator"),
+    actionFeed: this._createLayer("Manhunt action feed", "bottomLeft"),
+    personalMessage: this._createLayer("Manhunt personal message", "personalCenter")
   };
 };
 
@@ -231,6 +265,20 @@ ManhuntManager.prototype._createLayer = function (label, position) {
     root.style.left = "50%"; root.style.bottom = "84px"; root.style.transform = "translateX(-50%)";
     root.style.padding = "10px 18px"; root.style.borderRadius = "14px"; root.style.background = "rgba(5,12,24,0.86)";
     root.style.border = "2px solid #bdb2ff";
+  } else if (position === "bottomLeft") {
+    root.style.left = "18px"; root.style.bottom = "18px";
+    root.style.width = "min(420px, calc(100vw - 40px))";
+    root.style.padding = "10px 12px";
+    root.style.borderRadius = "14px";
+    root.style.background = "rgba(5,12,24,0.86)";
+    root.style.border = "2px solid rgba(255, 209, 102, 0.9)";
+    root.style.font = "700 14px/1.3 Arial, sans-serif";
+  } else if (position === "personalCenter") {
+    root.style.left = "50%"; root.style.top = "58%"; root.style.transform = "translate(-50%, -50%)";
+    root.style.maxWidth = "min(700px, calc(100vw - 48px))"; root.style.padding = "14px 20px";
+    root.style.borderRadius = "18px"; root.style.background = "rgba(48, 10, 10, 0.92)";
+    root.style.border = "2px solid #ff7a7a"; root.style.textAlign = "center";
+    root.style.fontSize = "34px";
   }
 
   document.body.appendChild(root);
@@ -245,6 +293,8 @@ ManhuntManager.prototype._renderUi = function () {
   this._renderTimer(snapshot);
   this._renderScoreboard(snapshot);
   this._renderSpectatorOverlay(snapshot);
+  this._renderActionFeed(snapshot);
+  this._renderPersonalMessage();
 };
 
 ManhuntManager.prototype._setLayerHtml = function (layer, html) {
@@ -307,6 +357,80 @@ ManhuntManager.prototype._renderSpectatorOverlay = function (snapshot) {
   if (local && local.manhuntStatus === "safe") text = "You made it to Home Base. Spectating until the round ends.";
   if (snapshot.state === "roundOver") text = "Round over. Spectating Home Base until free roam resumes.";
   this._setLayerHtml(this._layers.spectatorOverlay, text ? ManhuntManager.escapeHtml(text) : "");
+};
+
+ManhuntManager.prototype._renderActionFeed = function (snapshot) {
+  if (snapshot.state === "lobby" || this._actionFeed.length === 0) {
+    this._setLayerHtml(this._layers.actionFeed, "");
+    return;
+  }
+
+  var rows = "";
+  for (var i = 0; i < this._actionFeed.length; i++) {
+    var action = this._actionFeed[i];
+    var accent = "#bde0fe";
+    if (action.type === "tagged") accent = "#ff7a7a";
+    if (action.type === "safe") accent = "#7cff8a";
+    rows += "<div style='padding:6px 8px;border-left:3px solid " + accent + ";margin-top:" + (i === 0 ? 0 : 6) + "px;'>" +
+      ManhuntManager.escapeHtml(action.message) + "</div>";
+  }
+
+  this._setLayerHtml(this._layers.actionFeed,
+    "<div style='font-size:15px;color:#ffd166;margin-bottom:6px;'>Round Actions</div>" + rows);
+};
+
+ManhuntManager.prototype._renderPersonalMessage = function () {
+  var html = this._personalMessage ? "<div>" + ManhuntManager.escapeHtml(this._personalMessage) + "</div>" : "";
+  this._setLayerHtml(this._layers.personalMessage, html);
+};
+
+ManhuntManager.prototype._playTagSfx = function () {
+  var sound = this.tagSfxEntity && this.tagSfxEntity.sound ? this.tagSfxEntity.sound : null;
+  if (!sound || !sound.slots || !sound.slots.tagPop) return;
+  sound.play("tagPop");
+};
+
+ManhuntManager.prototype._spawnTagPop = function (event) {
+  if (!event || !Number.isFinite(event.x) || !Number.isFinite(event.y) || !Number.isFinite(event.z)) return;
+  var count = 11;
+  var base = new pc.Vec3(event.x, event.y + 1, event.z);
+
+  for (var i = 0; i < count; i++) {
+    var entity = new pc.Entity("TagPopParticle");
+    entity.addComponent("render", { type: "sphere" });
+    entity.setLocalScale(0.2, 0.2, 0.2);
+    entity.setPosition(base);
+    this.app.root.addChild(entity);
+
+    this._tagParticles.push({
+      entity: entity,
+      velocity: new pc.Vec3((Math.random() - 0.5) * 4.4, 1.4 + Math.random() * 2.2, (Math.random() - 0.5) * 4.4),
+      age: 0,
+      life: 0.5 + Math.random() * 0.2
+    });
+  }
+};
+
+ManhuntManager.prototype._updateTagParticles = function (dt) {
+  for (var i = this._tagParticles.length - 1; i >= 0; i--) {
+    var particle = this._tagParticles[i];
+    if (!particle || !particle.entity) {
+      this._tagParticles.splice(i, 1);
+      continue;
+    }
+
+    particle.age += dt;
+    var t = Math.min(1, particle.age / particle.life);
+    particle.velocity.y -= 9 * dt;
+    particle.entity.translate(particle.velocity.x * dt, particle.velocity.y * dt, particle.velocity.z * dt);
+    var scale = Math.max(0.01, 0.2 * (1 - t));
+    particle.entity.setLocalScale(scale, scale, scale);
+
+    if (particle.age >= particle.life) {
+      particle.entity.destroy();
+      this._tagParticles.splice(i, 1);
+    }
+  }
 };
 
 ManhuntManager.prototype._getResultsHtml = function (snapshot, includeTitle) {
@@ -555,6 +679,10 @@ ManhuntManager.prototype._validateSetup = function () {
 };
 
 ManhuntManager.prototype._onDestroy = function () {
+  for (var i = 0; i < this._tagParticles.length; i++) {
+    if (this._tagParticles[i] && this._tagParticles[i].entity) this._tagParticles[i].entity.destroy();
+  }
+  this._tagParticles = [];
   for (var key in this._layers) {
     if (Object.prototype.hasOwnProperty.call(this._layers, key) && this._layers[key] && this._layers[key].parentNode) {
       this._layers[key].parentNode.removeChild(this._layers[key]);

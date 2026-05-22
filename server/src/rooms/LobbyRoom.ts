@@ -49,6 +49,19 @@ type ManhuntPhase =
   | "roundOver";
 type ManhuntTeam = "none" | "hider" | "seeker";
 type ManhuntStatus = "none" | "active" | "safe" | "tagged";
+type ManhuntActionType = "tagged" | "safe" | "roundStart" | "roundOver";
+type ManhuntActionEvent = {
+  type: ManhuntActionType;
+  message: string;
+  actorId: string;
+  actorName: string;
+  targetId: string;
+  targetName: string;
+  x: number;
+  y: number;
+  z: number;
+  timestamp: number;
+};
 
 type ManhuntStartDebugMessage = {
   localPlayer?: Vec3 | null;
@@ -574,6 +587,24 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     console.log(
       `[Manhunt] phase changed -> ${phase} (${seconds}s): ${message}`,
     );
+    if (phase === "activeRound") {
+      this.broadcastManhuntAction({
+        type: "roundStart",
+        message: "Round started! Hiders run, seekers tag.",
+        actorId: "",
+        actorName: "",
+        targetId: "",
+        targetName: "",
+        x: this.state.manhunt.safeZoneX,
+        y: this.state.manhunt.safeZoneY,
+        z: this.state.manhunt.safeZoneZ,
+        timestamp: Date.now(),
+      });
+    }
+  }
+
+  private broadcastManhuntAction(event: ManhuntActionEvent): void {
+    this.broadcast("manhunt:action", event);
   }
 
   private handleManhuntTagRequest(client: Client): void {
@@ -602,6 +633,18 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     seeker.manhuntPoints += 3;
     seeker.totalPoints += 3;
     this.state.manhunt.message = `${seeker.name} tagged ${nearest.player.name}!`;
+    this.broadcastManhuntAction({
+      type: "tagged",
+      message: `${seeker.name} tagged ${nearest.player.name}!`,
+      actorId: client.sessionId,
+      actorName: seeker.name,
+      targetId: nearest.sessionId,
+      targetName: nearest.player.name,
+      x: nearest.player.x,
+      y: nearest.player.y,
+      z: nearest.player.z,
+      timestamp: Date.now(),
+    });
     console.log(
       `[Manhunt] tag: ${this.playerLabel(client.sessionId)} tagged ${this.playerLabel(nearest.sessionId)} (+3 seeker points)`,
     );
@@ -655,6 +698,18 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
       player.manhuntPoints += 3;
       player.totalPoints += 3;
       this.state.manhunt.message = `${player.name} reached Home Base!`;
+      this.broadcastManhuntAction({
+        type: "safe",
+        message: `${player.name} reached Home Base safely!`,
+        actorId: sessionId,
+        actorName: player.name,
+        targetId: "",
+        targetName: "",
+        x: player.x,
+        y: player.y,
+        z: player.z,
+        timestamp: Date.now(),
+      });
       console.log(
         `[Manhunt] safe event: ${this.playerLabel(sessionId)} reached Home Base (+3 hider points)`,
       );
@@ -681,6 +736,18 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
       ROUND_OVER_SECONDS,
       this.buildRoundOverMessage(reason),
     );
+    this.broadcastManhuntAction({
+      type: "roundOver",
+      message: `Round over: ${reason}`,
+      actorId: "",
+      actorName: "",
+      targetId: "",
+      targetName: "",
+      x: this.state.manhunt.safeZoneX,
+      y: this.state.manhunt.safeZoneY,
+      z: this.state.manhunt.safeZoneZ,
+      timestamp: Date.now(),
+    });
     console.log(`[Manhunt] round over: ${reason}`);
   }
 

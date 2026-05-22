@@ -11,7 +11,7 @@ These scripts are designed to be copied/uploaded into your **existing PlayCanvas
 - `PlayerAppearance.js` - shared helper/script for body color and hat selection
 - `PregameOverlay.js` - DOM pre-game profile picker for name, body color, and hat
 - `NetworkDebugOverlay.js` - temporary DOM overlay for multiplayer playtests
-- `ManhuntManager.js` - client-side PlayCanvas Manhunt vertical slice with round state, tagging, safe-zone scoring, and a DOM HUD
+- `ManhuntManager.js` - client-side PlayCanvas Manhunt vertical slice with round state, tagging, safe-zone scoring, action feed feedback, tag burst FX, and a DOM HUD
 
 ## Important
 
@@ -21,6 +21,8 @@ These scripts are designed to be copied/uploaded into your **existing PlayCanvas
 4. During multi-screen tests, add `NetworkDebugOverlay.js` to the same NetworkManager entity so each client reports its connection/session/remote-visibility state on screen.
 5. For the pre-game flow, attach `PregameOverlay.js` to a `PregameUI` entity, set `PregameOverlay.networkClientEntity` to `NetworkManager`, and set `ArcadeNetworkClient.autoConnect=false`.
 6. For Manhunt tests, attach `ManhuntManager.js` to `GameModeManager` or `NetworkManager`, then assign its network manager, remote player manager, local player, spawn marker, and safe-zone marker attributes. Press `M` in the lobby to start/reset and press `E` as the seeker to tag nearby active hiders.
+7. Optional tag sound setup: assign `ManhuntManager.tagSfxEntity` to an entity that has a **Sound** component and a sound slot named `tagPop`. If this entity/slot is not assigned, tag SFX is skipped safely.
+8. The Manhunt action feed (bottom-left, last 5 important actions) requires no separate setup and appears automatically during rounds.
 
 ## Pre-game customization setup
 
