@@ -49,3 +49,10 @@ RemotePlayerTemplate
 - Shop economy
 - Arcade machine interactions that launch mini-games
 - Server-authoritative Manhunt/Hide & Seek synchronization
+
+## Ticket Economy (Prototype)
+- Add `TicketPickupManager` and `TicketLeaderboard` scripts to your NetworkManager or GameModeManager entity.
+- Create `TicketSpawnRoot` with exactly 16 enabled child transform markers.
+- Create a disabled `TicketTemplate` entity (with visuals/collider and optional `TicketCollectibleVisual`).
+- Assign `networkManagerEntity`, `localPlayerEntity`, `ticketSpawnRoot`, `ticketTemplate`, `collectRadius` and optional `collectSfx`.
+- Ticket totals are prototype-persisted via `localStorage` per browser/device.

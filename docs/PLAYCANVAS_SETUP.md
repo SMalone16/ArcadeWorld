@@ -257,3 +257,10 @@ Production note: this client-sent bridge is intentionally convenient for develop
 
 - Re-upload the updated client scripts from `client-scripts/` into PlayCanvas, especially `ArcadeNetworkClient.js`, `LocalPlayerController.js`, `RemotePlayerManager.js`, `ManhuntManager.js`, and `ManhuntMapConfig.js`.
 - Re-check the `ManhuntManager.js` script attributes in the Editor after upload because the new camera attributes must be assigned before the classroom playtest.
+
+## Ticket Pickup Setup (Free Roam)
+1. Create `TicketSpawnRoot` with **exactly 16 enabled child transforms** for ticket spawn candidates.
+2. Create a disabled `TicketTemplate` entity to clone at runtime.
+3. Attach `TicketPickupManager` and `TicketLeaderboard` to your NetworkManager/GameModeManager.
+4. Wire script attributes: network manager, local player, spawn root, template, collect radius, optional collect SFX asset.
+5. Optional: add `TicketCollectibleVisual` on the ticket template for bob/rotation.
