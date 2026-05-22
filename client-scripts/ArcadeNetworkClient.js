@@ -66,7 +66,8 @@ ArcadeNetworkClient.prototype.initialize = function () {
     manhuntAction: [],
     manhuntStateChanged: [],
     ticketCollected: [],
-    ticketLeaderboardChanged: []
+    ticketLeaderboardChanged: [],
+    ticketSpawnConfigResult: []
   };
 
   this.sessionId = null;
@@ -89,6 +90,7 @@ ArcadeNetworkClient.prototype.initialize = function () {
   this._deviceId = this._loadOrCreateDeviceId();
   this._localTickets = this._loadSavedTickets();
   this._knownTickets = {};
+  this._lastTicketSpawnConfigResult = null;
 
   var cfg = window.ArcadeConfig || {};
   this._serverUrl = this.serverUrl || cfg.SERVER_URL || "";
@@ -768,6 +770,10 @@ ArcadeNetworkClient.prototype._bindTicketCollectionMessages = function () {
     this._emit("ticketCollected", payload || {});
     this._emit("ticketLeaderboardChanged", this.getTicketLeaderboard());
   }.bind(this));
+  this.room.onMessage("tickets:spawnConfigResult", function (payload) {
+    this._lastTicketSpawnConfigResult = payload || null;
+    this._emit("ticketSpawnConfigResult", payload || null);
+  }.bind(this));
 };
 
 
@@ -790,7 +796,11 @@ ArcadeNetworkClient.prototype.getTicketLeaderboard = function () { var rows=[]; 
 ArcadeNetworkClient.prototype.getLocalTickets = function () { return this._localTickets || 0; };
 ArcadeNetworkClient.prototype.onTicketCollected = function (callback) { this.onEvent("ticketCollected", callback); };
 ArcadeNetworkClient.prototype.onTicketLeaderboardChanged = function (callback) { this.onEvent("ticketLeaderboardChanged", callback); };
-ArcadeNetworkClient.prototype.getTicketsState = function () { var out={}; for (var id in this._knownTickets) { var t=this._knownTickets[id]; out[id]={ id:id, x:t.x||0, y:t.y||0, z:t.z||0, spawnIndex:t.spawnIndex||0, active:t.active===true, version:t.version||0 }; } return out; };
+ArcadeNetworkClient.prototype.getTicketsState = function () { var out={}; for (var id in this._knownTickets) { var t=this._knownTickets[id]; out[id]={ id:id, x:t.x||0, y:t.y||0, z:t.z||0, spawnIndex:t.spawnIndex||0, active:t.active===true, version:t.version||0 }; } if (Object.keys(out).length===0 && this.room && this.room.state && this.room.state.tickets) { this.room.state.tickets.forEach(function(t, ticketId){ out[ticketId]={ id:ticketId, x:t.x||0, y:t.y||0, z:t.z||0, spawnIndex:t.spawnIndex||0, active:t.active===true, version:t.version||0 }; }); if (Object.keys(out).length>0) { console.warn("[Tickets] Raw room tickets exist while known ticket cache is empty."); } } return out; };
+ArcadeNetworkClient.prototype.getRawTicketStateCount = function () { if (!this.room || !this.room.state || !this.room.state.tickets) return 0; var count = 0; this.room.state.tickets.forEach(function () { count += 1; }); return count; };
+ArcadeNetworkClient.prototype.getRawActiveTicketStateCount = function () { if (!this.room || !this.room.state || !this.room.state.tickets) return 0; var count = 0; this.room.state.tickets.forEach(function (ticket) { if (ticket && ticket.active === true) count += 1; }); return count; };
+ArcadeNetworkClient.prototype.getLastTicketSpawnConfigResult = function () { return this._lastTicketSpawnConfigResult || null; };
+ArcadeNetworkClient.prototype.onTicketSpawnConfigResult = function (callback) { this.onEvent("ticketSpawnConfigResult", callback); };
 ArcadeNetworkClient.prototype._loadOrCreateDeviceId = function () { try { var key=this._storageKeys.deviceId; var id=window.localStorage.getItem(key); if (id) return id; id="dev-"+Math.random().toString(36).slice(2,12); window.localStorage.setItem(key,id); console.log("[Tickets] Created local deviceId", id); return id; } catch (_err) { return "dev-ephemeral"; } };
 ArcadeNetworkClient.prototype._loadSavedTickets = function () { try { var raw=window.localStorage.getItem(this._storageKeys.tickets); var n=Math.max(0, Math.floor(Number(raw||0))); console.log("[Tickets] Loaded local saved tickets", n); return n; } catch (_err) { return 0; } };
 ArcadeNetworkClient.prototype._saveTickets = function (count) { try { window.localStorage.setItem(this._storageKeys.tickets, String(Math.max(0, Math.floor(count||0)))); console.log("[Tickets] Saved local tickets", count); } catch (_err) {} };

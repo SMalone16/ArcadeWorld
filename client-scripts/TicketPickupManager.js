@@ -23,7 +23,8 @@ TicketPickupManager.prototype.initialize = function () {
     this._lastSpawnSendResult = "not attempted";
     this._lastWarning = "";
     this._debugOverlay = null;
-    this._debugEnabled = true;
+    this._debugEnabled = this.showDebugOverlay === true;
+    this._lastServerSpawnAck = null;
 
     if (!this.networkClient) {
         this._setWarning("Missing ArcadeNetworkClient");
@@ -47,6 +48,9 @@ TicketPickupManager.prototype.initialize = function () {
     }
     if (this.networkClient && this.networkClient.onTicketCollected) {
         this.networkClient.onTicketCollected(this._onTicketCollected.bind(this));
+    }
+    if (this.networkClient && this.networkClient.onTicketSpawnConfigResult) {
+        this.networkClient.onTicketSpawnConfigResult(this._onTicketSpawnConfigResult.bind(this));
     }
 
     this._onDebugKeyDownBound = this._onDebugKeyDown.bind(this);
@@ -113,14 +117,14 @@ TicketPickupManager.prototype._trySendSpawnConfig = function () {
         return;
     }
 
-    console.log("[Tickets] Room ready; sending spawn config...");
+    console.log("[Tickets] Attempting spawn config send", { count: spawnCount });
     var sent = this.networkClient.sendTicketSpawnConfig ? this.networkClient.sendTicketSpawnConfig(this._spawnPositions) : false;
     this._lastSpawnSendResult = sent ? "true" : "false";
 
     if (sent) {
         this._hasSentSpawnConfig = true;
         this._lastWarning = "";
-        console.log("[Tickets] Spawn config sent successfully.");
+        console.log("[Tickets] Spawn config sent successfully client-side.");
     } else {
         this._setWarning("sendTicketSpawnConfig returned false");
     }
@@ -164,6 +168,11 @@ TicketPickupManager.prototype._syncTickets = function () {
     }
 
     console.log("[Tickets] Known tickets: " + ids.length + " active: " + activeCount + " cloned: " + Object.keys(this._ticketEntities).length);
+};
+
+TicketPickupManager.prototype._onTicketSpawnConfigResult = function (payload) {
+    this._lastServerSpawnAck = payload || null;
+    console.log("[Tickets] Server spawn config result received", payload || null);
 };
 
 TicketPickupManager.prototype._checkCollects = function () {
@@ -234,13 +243,13 @@ TicketPickupManager.prototype._updateDebugOverlay = function () {
     if (!this._debugOverlay) {
         this._debugOverlay = document.createElement("pre");
         this._debugOverlay.style.position = "fixed";
-        this._debugOverlay.style.top = "8px";
-        this._debugOverlay.style.left = "8px";
+        this._debugOverlay.style.top = "12px";
+        this._debugOverlay.style.right = "12px";
         this._debugOverlay.style.zIndex = "9999";
         this._debugOverlay.style.margin = "0";
-        this._debugOverlay.style.padding = "8px";
-        this._debugOverlay.style.background = "rgba(0,0,0,0.7)";
-        this._debugOverlay.style.color = "#9ef59e";
+        this._debugOverlay.style.padding = "10px";
+        this._debugOverlay.style.background = "rgba(0,0,0,0.78)";
+        this._debugOverlay.style.color = "#b8ffb8";
         this._debugOverlay.style.font = "12px/1.3 monospace";
         this._debugOverlay.style.maxWidth = "420px";
         this._debugOverlay.style.pointerEvents = "none";
@@ -259,18 +268,25 @@ TicketPickupManager.prototype._updateDebugOverlay = function () {
     var lines = [];
     lines.push("[Ticket Debug]");
     lines.push("Network Client: " + (this.networkClient ? "yes" : "no"));
-    lines.push("Room Connected: " + (this.networkClient && this.networkClient.room ? "yes" : "no"));
+    lines.push("Connected: " + (this.networkClient && this.networkClient.room ? "yes" : "no"));
     lines.push("Session ID: " + (this.networkClient && this.networkClient.room && this.networkClient.room.sessionId ? this.networkClient.room.sessionId : "n/a"));
-    lines.push("Spawn Root assigned: " + (this.ticketSpawnRoot ? "yes" : "no"));
+    lines.push("Room Name: " + (this.networkClient && this.networkClient._roomName ? this.networkClient._roomName : "n/a"));
     lines.push("Spawn Positions Found: " + (this._spawnPositions ? this._spawnPositions.length : 0));
-    lines.push("Ticket Template assigned: " + (this.ticketTemplate ? "yes" : "no"));
     lines.push("Spawn Config Sent: " + (this._hasSentSpawnConfig ? "yes" : "no"));
     lines.push("Last Spawn Send Result: " + this._lastSpawnSendResult);
-    lines.push("Known Server Tickets: " + ticketIds.length);
-    lines.push("Active Server Tickets: " + activeCount);
-    lines.push("Cloned Ticket Entity count: " + Object.keys(this._ticketEntities).length);
-    lines.push("Last Warning: " + (this._lastWarning || "none"));
-    lines.push("Ticket IDs: " + (ticketIds.length ? ticketIds.slice(0, 6).join(", ") : "none"));
+    var rawStateCount = this.networkClient && this.networkClient.getRawTicketStateCount ? this.networkClient.getRawTicketStateCount() : 0;
+    var rawActiveCount = this.networkClient && this.networkClient.getRawActiveTicketStateCount ? this.networkClient.getRawActiveTicketStateCount() : 0;
+    var ack = this._lastServerSpawnAck || (this.networkClient && this.networkClient.getLastTicketSpawnConfigResult ? this.networkClient.getLastTicketSpawnConfigResult() : null);
+    lines.push("Last Client Warning: " + (this._lastWarning || "none"));
+    lines.push("Last Server Spawn Ack reason: " + (ack && ack.reason ? ack.reason : "none"));
+    lines.push("Last Server Spawn Ack accepted: " + (ack && typeof ack.accepted === "boolean" ? String(ack.accepted) : "n/a"));
+    lines.push("Last Server reported stateTicketCount: " + (ack && typeof ack.stateTicketCount === "number" ? ack.stateTicketCount : "n/a"));
+    lines.push("Raw Room State Tickets: " + rawStateCount);
+    lines.push("Raw Active Room State Tickets: " + rawActiveCount);
+    lines.push("Known Tickets Cache Count: " + ticketIds.length);
+    lines.push("Known Active Tickets Cache Count: " + activeCount);
+    lines.push("Cloned Ticket Entity Count: " + Object.keys(this._ticketEntities).length);
+    lines.push("Ticket IDs: " + (ticketIds.length ? ticketIds.join(", ") : "none"));
     this._debugOverlay.textContent = lines.join("\n");
 };
 
@@ -283,6 +299,12 @@ TicketPickupManager.prototype._removeDebugOverlay = function () {
 
 TicketPickupManager.prototype._onDebugKeyDown = function (evt) {
     if (!evt || evt.repeat) {
+        return;
+    }
+
+    if (evt.key === "F8") {
+        this._debugEnabled = !this._debugEnabled;
+        console.log("[Tickets] Debug overlay toggled", this._debugEnabled);
         return;
     }
 

@@ -1058,15 +1058,59 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
   }
 
   private handleTicketSpawnConfig(client: Client, message: TicketSpawnConfigMessage): void {
-    if (this.ticketSpawnPositions.length > 0) return;
     const positions = message?.positions;
-    if (!Array.isArray(positions) || positions.length !== TICKET_SPAWN_COUNT || positions.some((p) => !isFiniteVec3(p))) {
-      console.warn(`[Tickets] Invalid spawn config from ${client.sessionId}`);
+    const receivedCount = Array.isArray(positions) ? positions.length : 0;
+
+    if (this.ticketSpawnPositions.length > 0) {
+      client.send("tickets:spawnConfigResult", {
+        accepted: false,
+        reason: "ignored-already-configured",
+        receivedCount,
+        expectedCount: TICKET_SPAWN_COUNT,
+        stateTicketCount: this.state.tickets.size,
+        activeTicketCount: this.getActiveTicketCount(),
+      });
       return;
     }
+
+    if (!Array.isArray(positions) || positions.length !== TICKET_SPAWN_COUNT) {
+      console.warn(`[Tickets] Rejected spawn config count from ${client.sessionId}. received=${receivedCount}`);
+      client.send("tickets:spawnConfigResult", {
+        accepted: false,
+        reason: "rejected-invalid-count",
+        receivedCount,
+        expectedCount: TICKET_SPAWN_COUNT,
+        stateTicketCount: this.state.tickets.size,
+        activeTicketCount: this.getActiveTicketCount(),
+      });
+      return;
+    }
+
+    if (positions.some((position) => !isFiniteVec3(position))) {
+      console.warn(`[Tickets] Rejected spawn config invalid position payload from ${client.sessionId}`);
+      client.send("tickets:spawnConfigResult", {
+        accepted: false,
+        reason: "rejected-invalid-positions",
+        receivedCount,
+        expectedCount: TICKET_SPAWN_COUNT,
+        stateTicketCount: this.state.tickets.size,
+        activeTicketCount: this.getActiveTicketCount(),
+      });
+      return;
+    }
+
     this.ticketSpawnPositions = positions.map(copyVec3);
     console.log(`[Tickets] Accepted spawn config with ${positions.length} positions.`);
     this.seedInitialTickets();
+
+    client.send("tickets:spawnConfigResult", {
+      accepted: true,
+      reason: "accepted-and-seeded",
+      receivedCount,
+      expectedCount: TICKET_SPAWN_COUNT,
+      stateTicketCount: this.state.tickets.size,
+      activeTicketCount: this.getActiveTicketCount(),
+    });
   }
 
   private seedInitialTickets(): void {
@@ -1083,6 +1127,14 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
       this.state.tickets.set(ticket.id, ticket);
     }
     console.log('[Tickets] Spawned 10 active tickets.');
+  }
+
+  private getActiveTicketCount(): number {
+    let count = 0;
+    this.state.tickets.forEach((ticket) => {
+      if (ticket.active) count += 1;
+    });
+    return count;
   }
 
   private handleTicketCollectRequest(client: Client, message: TicketCollectRequestMessage): void {
