@@ -63,6 +63,7 @@ ArcadeNetworkClient.prototype.initialize = function () {
     remoteUpdated: [],
     remoteRemoved: [],
     manhuntEvent: [],
+    manhuntAction: [],
     manhuntStateChanged: [],
     ticketCollected: [],
     ticketLeaderboardChanged: []
@@ -552,6 +553,10 @@ ArcadeNetworkClient.prototype._bindManhuntMessages = function () {
   this.room.onMessage("manhunt:feedback", function (payload) {
     this._emit("manhuntEvent", { type: "feedback", message: payload && payload.message ? payload.message : "Manhunt request rejected." });
   }.bind(this));
+
+  this.room.onMessage("manhunt:action", function (payload) {
+    this._emit("manhuntAction", payload || {});
+  }.bind(this));
 };
 
 ArcadeNetworkClient.prototype.sendManhuntEvent = function (payload) {
@@ -604,6 +609,10 @@ ArcadeNetworkClient.prototype.sendPlayerPositionCapture = function (payload) {
 
 ArcadeNetworkClient.prototype.onManhuntEvent = function (callback) {
   this.onEvent("manhuntEvent", callback);
+};
+
+ArcadeNetworkClient.prototype.onManhuntAction = function (callback) {
+  this.onEvent("manhuntAction", callback);
 };
 
 ArcadeNetworkClient.prototype.onConnected = function (callback) {
