@@ -252,7 +252,9 @@ Production note: this client-sent bridge is intentionally convenient for develop
 - Press **F** to toggle the Manhunt scoreboard overlay. It also opens automatically during `roundOver`.
 - Press **P** while standing at an intended Manhunt marker to capture the local player root position. The client sends `debug:playerPositionCapture`, and the server logs `[ManhuntDebug] Position capture from ...: x, y, z`. This is still useful for debugging player-root Y values.
 - Press **O** to resend/log `ManhuntMapConfig.js` marker positions while Manhunt is in the `lobby` phase.
-- Press **Shift** to sprint.
+- Use **WASD** to move in Free Roam / normal play.
+- Move the **Mouse** to look while pointer lock is active.
+- Hold **Shift** while moving to sprint; sprint uses stamina and recharges when not sprinting.
 - Press **Space** to jump.
 
 ### After this PR is merged
