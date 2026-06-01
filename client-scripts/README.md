@@ -6,12 +6,19 @@ These scripts are designed to be copied/uploaded into your **existing PlayCanvas
 
 - `ArcadeConfig.js` - shared config (`SERVER_URL`, room name)
 - `ArcadeNetworkClient.js` - Colyseus connection + room state events
-- `LocalPlayerController.js` - local WASD movement + move sync to server
+- `LocalPlayerController.js` - local WASD movement, Shift sprint/stamina, and move sync to server
 - `RemotePlayerManager.js` - creates/updates/removes remote avatars and DOM nametags
 - `PlayerAppearance.js` - shared helper/script for body color and hat selection
 - `PregameOverlay.js` - DOM pre-game profile picker for name, body color, and hat
 - `NetworkDebugOverlay.js` - temporary DOM overlay for multiplayer playtests
 - `ManhuntManager.js` - client-side PlayCanvas Manhunt vertical slice with round state, tagging, safe-zone scoring, action feed feedback, tag burst FX, and a DOM HUD
+
+## Free Roam controls
+
+- **WASD** to move.
+- **Mouse** to look.
+- Hold **Shift** while moving to sprint.
+- Sprint uses stamina and recharges when not sprinting.
 
 ## Important
 

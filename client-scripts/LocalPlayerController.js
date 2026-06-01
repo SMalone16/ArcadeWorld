@@ -155,6 +155,30 @@ LocalPlayerController.attributes.add("hiderSprintStartThreshold", {
   title: "Hider Sprint Start Threshold"
 });
 
+LocalPlayerController.attributes.add("freeRoamSprintMultiplier", {
+  type: "number",
+  default: 1.5,
+  title: "Free Roam Sprint Multiplier"
+});
+
+LocalPlayerController.attributes.add("freeRoamSprintDuration", {
+  type: "number",
+  default: 5,
+  title: "Free Roam Sprint Duration"
+});
+
+LocalPlayerController.attributes.add("freeRoamSprintRefillDuration", {
+  type: "number",
+  default: 5,
+  title: "Free Roam Sprint Refill Duration"
+});
+
+LocalPlayerController.attributes.add("freeRoamSprintStartThreshold", {
+  type: "number",
+  default: 0.2,
+  title: "Free Roam Sprint Start Threshold"
+});
+
 LocalPlayerController.attributes.add("sprintDepletedRechargeDelay", {
   type: "number",
   default: 0.25,
@@ -661,7 +685,7 @@ LocalPlayerController.prototype._updateSprint = function (dt) {
     }
   }
 
-  this._updateSprintHud(this._isPlaying());
+  this._updateSprintHud(this._isPlaying() && !!config);
 };
 
 LocalPlayerController.prototype._canStartSprint = function (config) {
@@ -677,25 +701,41 @@ LocalPlayerController.prototype._getLocalManhuntTeam = function () {
 
 LocalPlayerController.prototype._getSprintConfig = function () {
   var state = this.networkClient && this.networkClient.getManhuntState ? this.networkClient.getManhuntState() : null;
-  if (!state || state.phase !== "activeRound") return null;
 
-  var team = this._getLocalManhuntTeam();
-  if (team === "seeker") {
+  if (state && state.phase === "activeRound") {
+    var team = this._getLocalManhuntTeam();
+    if (team === "seeker") {
+      return {
+        mode: "manhunt-seeker",
+        multiplier: this.seekerSprintMultiplier,
+        sprintDuration: this.seekerSprintDuration,
+        refillDuration: this.seekerSprintRefillDuration,
+        startThreshold: this.seekerSprintStartThreshold
+      };
+    }
+    if (team === "hider") {
+      return {
+        mode: "manhunt-hider",
+        multiplier: this.hiderSprintMultiplier,
+        sprintDuration: this.hiderSprintDuration,
+        refillDuration: this.hiderSprintRefillDuration,
+        startThreshold: this.hiderSprintStartThreshold
+      };
+    }
+
+    return null;
+  }
+
+  if (this._isPlaying()) {
     return {
-      multiplier: this.seekerSprintMultiplier,
-      sprintDuration: this.seekerSprintDuration,
-      refillDuration: this.seekerSprintRefillDuration,
-      startThreshold: this.seekerSprintStartThreshold
+      mode: "free-roam",
+      multiplier: this.freeRoamSprintMultiplier,
+      sprintDuration: this.freeRoamSprintDuration,
+      refillDuration: this.freeRoamSprintRefillDuration,
+      startThreshold: this.freeRoamSprintStartThreshold
     };
   }
-  if (team === "hider") {
-    return {
-      multiplier: this.hiderSprintMultiplier,
-      sprintDuration: this.hiderSprintDuration,
-      refillDuration: this.hiderSprintRefillDuration,
-      startThreshold: this.hiderSprintStartThreshold
-    };
-  }
+
   return null;
 };
 
