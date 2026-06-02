@@ -5,6 +5,7 @@ TicketPickupManager.attributes.add("localPlayerEntity", { type: "entity" });
 TicketPickupManager.attributes.add("ticketSpawnRoot", { type: "entity" });
 TicketPickupManager.attributes.add("ticketTemplate", { type: "entity" });
 TicketPickupManager.attributes.add("collectRadius", { type: "number", default: 2.2 });
+TicketPickupManager.attributes.add("collectVerticalTolerance", { type: "number", default: 3 });
 TicketPickupManager.attributes.add("collectSfx", { type: "asset", assetType: "audio" });
 TicketPickupManager.attributes.add("showDebugOverlay", {
     type: "boolean",
@@ -16,6 +17,7 @@ TicketPickupManager.prototype.initialize = function () {
     this.networkClient = this.networkManagerEntity && this.networkManagerEntity.script ? this.networkManagerEntity.script.arcadeNetworkClient : null;
     this._ticketEntities = {};
     this._requested = {};
+    this._requestTimeouts = {};
     this._fx = [];
 
     this._spawnPositions = [];
@@ -25,6 +27,7 @@ TicketPickupManager.prototype.initialize = function () {
     this._debugOverlay = null;
     this._debugEnabled = this.showDebugOverlay === true;
     this._lastServerSpawnAck = null;
+    this._lastCollectDebug = null;
 
     if (!this.networkClient) {
         this._setWarning("Missing ArcadeNetworkClient");
@@ -49,6 +52,9 @@ TicketPickupManager.prototype.initialize = function () {
     if (this.networkClient && this.networkClient.onTicketCollected) {
         this.networkClient.onTicketCollected(this._onTicketCollected.bind(this));
     }
+    if (this.networkClient && this.networkClient.onTicketCollectRejected) {
+        this.networkClient.onTicketCollectRejected(this._onTicketCollectRejected.bind(this));
+    }
     if (this.networkClient && this.networkClient.onTicketSpawnConfigResult) {
         this.networkClient.onTicketSpawnConfigResult(this._onTicketSpawnConfigResult.bind(this));
     }
@@ -71,6 +77,7 @@ TicketPickupManager.prototype.destroy = function () {
     if (this._onDebugKeyDownBound && typeof window !== "undefined" && window.removeEventListener) {
         window.removeEventListener("keydown", this._onDebugKeyDownBound);
     }
+    this._clearAllRequestTimeouts();
     this._removeDebugOverlay();
 };
 
@@ -184,20 +191,100 @@ TicketPickupManager.prototype._checkCollects = function () {
         var t = tickets[id];
         if (!t.active || this._requested[id]) continue;
         var dx = lp.x - t.x, dy = lp.y - t.y, dz = lp.z - t.z;
-        if (Math.sqrt(dx * dx + dy * dy + dz * dz) <= this.collectRadius) {
-            this._requested[id] = true;
-            this.networkClient.sendTicketCollectRequest(id);
+        var fullDistance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        var xzDistance = Math.sqrt(dx * dx + dz * dz);
+        if (xzDistance <= this.collectRadius && Math.abs(dy) <= this.collectVerticalTolerance) {
+            this._requestTicketCollect(id, lp, t, fullDistance, xzDistance);
         }
     }
 };
 
+TicketPickupManager.prototype._requestTicketCollect = function (ticketId, playerPosition, ticket, fullDistance, xzDistance) {
+    this._requested[ticketId] = true;
+
+    if (this.networkClient && this.networkClient.sendMove) {
+        var rotY = this.localPlayerEntity ? this.localPlayerEntity.getEulerAngles().y : 0;
+        this.networkClient.sendMove(playerPosition, rotY, null);
+    }
+
+    var sent = this.networkClient.sendTicketCollectRequest(ticketId, playerPosition);
+    this._lastCollectDebug = {
+        type: sent ? "requested" : "send-failed",
+        reason: sent ? "sent-to-server" : "missing-room-or-ticket-id",
+        ticketId: ticketId,
+        playerPosition: { x: playerPosition.x, y: playerPosition.y, z: playerPosition.z },
+        ticketPosition: ticket ? { x: ticket.x, y: ticket.y, z: ticket.z } : null,
+        distance: fullDistance,
+        distanceXZ: xzDistance,
+        active: ticket ? ticket.active === true : null,
+        collectRadius: this.collectRadius,
+        verticalTolerance: this.collectVerticalTolerance,
+        timestamp: Date.now()
+    };
+    console.log("[Tickets] Collect request", this._lastCollectDebug);
+
+    if (!sent) {
+        this._clearRequestedTicket(ticketId);
+        return;
+    }
+
+    this._setRequestTimeout(ticketId);
+};
+
+TicketPickupManager.prototype._setRequestTimeout = function (ticketId) {
+    this._clearRequestTimeout(ticketId);
+    this._requestTimeouts[ticketId] = setTimeout(function () {
+        if (this._requested[ticketId]) {
+            delete this._requested[ticketId];
+            this._lastCollectDebug = {
+                type: "timeout",
+                reason: "no-success-or-rejection-within-500ms",
+                ticketId: ticketId,
+                timestamp: Date.now()
+            };
+            console.warn("[Tickets] Collect request timed out; retry is now allowed", this._lastCollectDebug);
+        }
+        delete this._requestTimeouts[ticketId];
+    }.bind(this), 500);
+};
+
+TicketPickupManager.prototype._clearRequestTimeout = function (ticketId) {
+    if (this._requestTimeouts[ticketId]) {
+        clearTimeout(this._requestTimeouts[ticketId]);
+        delete this._requestTimeouts[ticketId];
+    }
+};
+
+TicketPickupManager.prototype._clearRequestedTicket = function (ticketId) {
+    delete this._requested[ticketId];
+    this._clearRequestTimeout(ticketId);
+};
+
+TicketPickupManager.prototype._clearAllRequestTimeouts = function () {
+    for (var id in this._requestTimeouts) {
+        if (Object.prototype.hasOwnProperty.call(this._requestTimeouts, id)) {
+            clearTimeout(this._requestTimeouts[id]);
+        }
+    }
+    this._requestTimeouts = {};
+};
+
 TicketPickupManager.prototype._onTicketCollected = function (payload) {
     if (!payload || !payload.ticketId) return;
-    delete this._requested[payload.ticketId];
+    this._clearRequestedTicket(payload.ticketId);
+    this._lastCollectDebug = { type: "collected", reason: "server-confirmed", ticketId: payload.ticketId, ticketPosition: { x: payload.x, y: payload.y, z: payload.z }, tickets: payload.tickets, timestamp: Date.now() };
+    console.log("[Tickets] Collect confirmed", this._lastCollectDebug);
     if (this.collectSfx && this.entity.sound) {
         this.entity.sound.play(this.collectSfx.name);
     }
     this._spawnFx(payload.x, payload.y, payload.z);
+};
+
+TicketPickupManager.prototype._onTicketCollectRejected = function (payload) {
+    if (!payload || !payload.ticketId) return;
+    this._clearRequestedTicket(payload.ticketId);
+    this._lastCollectDebug = payload;
+    console.warn("[Tickets] Collect rejected; retry is now allowed", payload);
 };
 
 TicketPickupManager.prototype._spawnFx = function (x, y, z) {
@@ -286,6 +373,9 @@ TicketPickupManager.prototype._updateDebugOverlay = function () {
     lines.push("Known Tickets Cache Count: " + ticketIds.length);
     lines.push("Known Active Tickets Cache Count: " + activeCount);
     lines.push("Cloned Ticket Entity Count: " + Object.keys(this._ticketEntities).length);
+    lines.push("Pending Collect Requests: " + (Object.keys(this._requested).length ? Object.keys(this._requested).join(", ") : "none"));
+    var reject = this._lastCollectDebug || (this.networkClient && this.networkClient.getLastTicketCollectRejected ? this.networkClient.getLastTicketCollectRejected() : null);
+    lines.push("Last Collect Debug: " + (reject ? JSON.stringify(reject) : "none"));
     lines.push("Ticket IDs: " + (ticketIds.length ? ticketIds.join(", ") : "none"));
     this._debugOverlay.textContent = lines.join("\n");
 };
@@ -321,7 +411,9 @@ TicketPickupManager.prototype._onDebugKeyDown = function (evt) {
             },
             hasSentSpawnConfig: this._hasSentSpawnConfig,
             lastSpawnSendResult: this._lastSpawnSendResult,
-            lastWarning: this._lastWarning
+            lastWarning: this._lastWarning,
+            requestedTickets: Object.keys(this._requested),
+            lastCollectDebug: this._lastCollectDebug || (this.networkClient && this.networkClient.getLastTicketCollectRejected ? this.networkClient.getLastTicketCollectRejected() : null)
         });
     }
 };
