@@ -65,3 +65,4 @@ RemotePlayerTemplate
 - Create a disabled `TicketTemplate` entity (with visuals/collider and optional `TicketCollectibleVisual`).
 - Assign `networkManagerEntity`, `localPlayerEntity`, `ticketSpawnRoot`, `ticketTemplate`, `collectRadius` and optional `collectSfx`.
 - Ticket totals are prototype-persisted via `localStorage` per browser/device.
+- Ticket debug controls: press `F8` to toggle the in-game ticket debug overlay. Press `T` to log a ticket debug snapshot to the browser console and show an on-screen confirmation/overlay with nearest authoritative ticket, nearest visual clone, and recent collection request/rejection details.
