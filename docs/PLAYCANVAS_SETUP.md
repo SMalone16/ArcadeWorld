@@ -268,3 +268,4 @@ Production note: this client-sent bridge is intentionally convenient for develop
 3. Attach `TicketPickupManager` and `TicketLeaderboard` to your NetworkManager/GameModeManager.
 4. Wire script attributes: network manager, local player, spawn root, template, collect radius, optional collect SFX asset.
 5. Optional: add `TicketCollectibleVisual` on the ticket template for bob/rotation.
+6. During ticket playtests, press **F8** to toggle the ticket debug overlay. Press **T** to log a ticket debug snapshot to the browser console and show/update an on-screen line; the overlay includes the nearest authoritative ticket, nearest visual clone, collection distances/tolerances, and recent request/success/rejection details.

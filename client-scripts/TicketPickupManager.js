@@ -28,6 +28,11 @@ TicketPickupManager.prototype.initialize = function () {
     this._debugEnabled = this.showDebugOverlay === true;
     this._lastServerSpawnAck = null;
     this._lastCollectDebug = null;
+    this._lastCollectRequest = null;
+    this._lastCollectSuccess = null;
+    this._lastCollectRejection = null;
+    this._lastCheckCollectDebug = null;
+    this._debugSnapshotMessage = "";
 
     if (!this.networkClient) {
         this._setWarning("Missing ArcadeNetworkClient");
@@ -146,6 +151,24 @@ TicketPickupManager.prototype._syncTickets = function () {
     var ids = Object.keys(tickets);
     var activeCount = 0;
 
+    for (var existingId in this._ticketEntities) {
+        if (!Object.prototype.hasOwnProperty.call(this._ticketEntities, existingId)) {
+            continue;
+        }
+        if (!Object.prototype.hasOwnProperty.call(tickets, existingId)) {
+            var removedEnt = this._ticketEntities[existingId];
+            if (removedEnt) {
+                removedEnt.enabled = false;
+                if (removedEnt.destroy) {
+                    removedEnt.destroy();
+                }
+            }
+            delete this._ticketEntities[existingId];
+            this._clearRequestedTicket(existingId);
+            console.log("[Tickets] Removed stale ticket visual for missing state id " + existingId);
+        }
+    }
+
     for (var id in tickets) {
         if (!Object.prototype.hasOwnProperty.call(tickets, id)) {
             continue;
@@ -159,7 +182,7 @@ TicketPickupManager.prototype._syncTickets = function () {
             ent.enabled = true;
             this.app.root.addChild(ent);
             this._ticketEntities[id] = ent;
-            console.log("[Tickets] Cloned ticket entity for " + id + " at " + t.x + "," + t.y + "," + t.z);
+            console.log("[Tickets] Cloned fresh ticket entity for " + id + " at " + t.x + "," + t.y + "," + t.z);
         }
 
         if (!ent) {
@@ -184,10 +207,22 @@ TicketPickupManager.prototype._onTicketSpawnConfigResult = function (payload) {
 
 TicketPickupManager.prototype._checkCollects = function () {
     var local = this.localPlayerEntity;
-    if (!local || !this.networkClient || !this.networkClient.sendTicketCollectRequest) return;
+    if (!local || !this.networkClient || !this.networkClient.sendTicketCollectRequest) {
+        this._lastCheckCollectDebug = {
+            sentRequest: false,
+            reason: !local ? "missing-local-player" : "missing-network-client-or-send-method",
+            timestamp: Date.now()
+        };
+        return;
+    }
+
     var lp = local.getPosition();
     var tickets = this.networkClient.getTicketsState ? this.networkClient.getTicketsState() : {};
+    var sentThisFrame = false;
+    var nearest = this._getNearestAuthoritativeTicket(lp, tickets);
+
     for (var id in tickets) {
+        if (!Object.prototype.hasOwnProperty.call(tickets, id)) continue;
         var t = tickets[id];
         if (!t.active || this._requested[id]) continue;
         var dx = lp.x - t.x, dy = lp.y - t.y, dz = lp.z - t.z;
@@ -195,8 +230,19 @@ TicketPickupManager.prototype._checkCollects = function () {
         var xzDistance = Math.sqrt(dx * dx + dz * dz);
         if (xzDistance <= this.collectRadius && Math.abs(dy) <= this.collectVerticalTolerance) {
             this._requestTicketCollect(id, lp, t, fullDistance, xzDistance);
+            sentThisFrame = true;
         }
     }
+
+    this._lastCheckCollectDebug = {
+        sentRequest: sentThisFrame,
+        nearestTicketId: nearest ? nearest.id : "none",
+        nearestDistanceXZ: nearest ? nearest.distanceXZ : null,
+        nearestVerticalDistance: nearest ? nearest.verticalDistance : null,
+        nearestWithinRange: nearest ? nearest.withinRange : false,
+        pendingRequests: Object.keys(this._requested),
+        timestamp: Date.now()
+    };
 };
 
 TicketPickupManager.prototype._requestTicketCollect = function (ticketId, playerPosition, ticket, fullDistance, xzDistance) {
@@ -221,6 +267,7 @@ TicketPickupManager.prototype._requestTicketCollect = function (ticketId, player
         verticalTolerance: this.collectVerticalTolerance,
         timestamp: Date.now()
     };
+    this._lastCollectRequest = this._lastCollectDebug;
     console.log("[Tickets] Collect request", this._lastCollectDebug);
 
     if (!sent) {
@@ -242,6 +289,7 @@ TicketPickupManager.prototype._setRequestTimeout = function (ticketId) {
                 ticketId: ticketId,
                 timestamp: Date.now()
             };
+            this._lastCollectRejection = this._lastCollectDebug;
             console.warn("[Tickets] Collect request timed out; retry is now allowed", this._lastCollectDebug);
         }
         delete this._requestTimeouts[ticketId];
@@ -273,6 +321,7 @@ TicketPickupManager.prototype._onTicketCollected = function (payload) {
     if (!payload || !payload.ticketId) return;
     this._clearRequestedTicket(payload.ticketId);
     this._lastCollectDebug = { type: "collected", reason: "server-confirmed", ticketId: payload.ticketId, ticketPosition: { x: payload.x, y: payload.y, z: payload.z }, tickets: payload.tickets, timestamp: Date.now() };
+    this._lastCollectSuccess = this._lastCollectDebug;
     console.log("[Tickets] Collect confirmed", this._lastCollectDebug);
     if (this.collectSfx && this.entity.sound) {
         this.entity.sound.play(this.collectSfx.name);
@@ -284,6 +333,7 @@ TicketPickupManager.prototype._onTicketCollectRejected = function (payload) {
     if (!payload || !payload.ticketId) return;
     this._clearRequestedTicket(payload.ticketId);
     this._lastCollectDebug = payload;
+    this._lastCollectRejection = payload;
     console.warn("[Tickets] Collect rejected; retry is now allowed", payload);
 };
 
@@ -316,12 +366,63 @@ TicketPickupManager.prototype._updateFx = function (dt) {
     }
 };
 
+
+TicketPickupManager.prototype._formatTicketVec = function (position) {
+    if (!position) return "n/a";
+    return "(" + Number(position.x || 0).toFixed(2) + ", " + Number(position.y || 0).toFixed(2) + ", " + Number(position.z || 0).toFixed(2) + ")";
+};
+
+TicketPickupManager.prototype._getNearestAuthoritativeTicket = function (playerPosition, tickets) {
+    if (!playerPosition || !tickets) return null;
+    var nearest = null;
+    for (var id in tickets) {
+        if (!Object.prototype.hasOwnProperty.call(tickets, id)) continue;
+        var t = tickets[id];
+        var dx = playerPosition.x - t.x;
+        var dy = playerPosition.y - t.y;
+        var dz = playerPosition.z - t.z;
+        var xzDistance = Math.sqrt(dx * dx + dz * dz);
+        var verticalDistance = Math.abs(dy);
+        var entry = {
+            id: id,
+            position: { x: t.x, y: t.y, z: t.z },
+            active: t.active === true,
+            distanceXZ: xzDistance,
+            verticalDistance: verticalDistance,
+            withinRange: xzDistance <= this.collectRadius && verticalDistance <= this.collectVerticalTolerance
+        };
+        if (!nearest || xzDistance < nearest.distanceXZ) {
+            nearest = entry;
+        }
+    }
+    return nearest;
+};
+
+TicketPickupManager.prototype._getNearestVisualTicket = function (playerPosition) {
+    if (!playerPosition) return null;
+    var nearest = null;
+    for (var id in this._ticketEntities) {
+        if (!Object.prototype.hasOwnProperty.call(this._ticketEntities, id)) continue;
+        var ent = this._ticketEntities[id];
+        if (!ent || ent.enabled !== true) continue;
+        var p = ent.getPosition();
+        var dx = playerPosition.x - p.x;
+        var dz = playerPosition.z - p.z;
+        var xzDistance = Math.sqrt(dx * dx + dz * dz);
+        var entry = { id: id, position: { x: p.x, y: p.y, z: p.z }, distanceXZ: xzDistance };
+        if (!nearest || xzDistance < nearest.distanceXZ) {
+            nearest = entry;
+        }
+    }
+    return nearest;
+};
+
 TicketPickupManager.prototype._updateDebugOverlay = function () {
     if (typeof document === "undefined") {
         return;
     }
 
-    var shouldShow = this._debugEnabled && this.showDebugOverlay;
+    var shouldShow = (this._debugEnabled && this.showDebugOverlay) || !!this._debugSnapshotMessage;
     if (!shouldShow) {
         this._removeDebugOverlay();
         return;
@@ -352,8 +453,17 @@ TicketPickupManager.prototype._updateDebugOverlay = function () {
         }
     }
 
+    var localPosition = this.localPlayerEntity ? this.localPlayerEntity.getPosition() : null;
+    var nearestAuth = this._getNearestAuthoritativeTicket(localPosition, tickets);
+    var nearestVisual = this._getNearestVisualTicket(localPosition);
+    var checkAgeMs = this._lastCheckCollectDebug ? Date.now() - this._lastCheckCollectDebug.timestamp : null;
+
     var lines = [];
     lines.push("[Ticket Debug]");
+    lines.push("Keys: F8 toggle overlay, T log console snapshot + show this overlay");
+    if (this._debugSnapshotMessage) {
+        lines.push(this._debugSnapshotMessage);
+    }
     lines.push("Network Client: " + (this.networkClient ? "yes" : "no"));
     lines.push("Connected: " + (this.networkClient && this.networkClient.room ? "yes" : "no"));
     lines.push("Session ID: " + (this.networkClient && this.networkClient.room && this.networkClient.room.sessionId ? this.networkClient.room.sessionId : "n/a"));
@@ -374,8 +484,25 @@ TicketPickupManager.prototype._updateDebugOverlay = function () {
     lines.push("Known Active Tickets Cache Count: " + activeCount);
     lines.push("Cloned Ticket Entity Count: " + Object.keys(this._ticketEntities).length);
     lines.push("Pending Collect Requests: " + (Object.keys(this._requested).length ? Object.keys(this._requested).join(", ") : "none"));
-    var reject = this._lastCollectDebug || (this.networkClient && this.networkClient.getLastTicketCollectRejected ? this.networkClient.getLastTicketCollectRejected() : null);
-    lines.push("Last Collect Debug: " + (reject ? JSON.stringify(reject) : "none"));
+    lines.push("Local Player Pos: " + this._formatTicketVec(localPosition));
+    if (nearestAuth) {
+        lines.push("Nearest Auth Ticket: " + nearestAuth.id + " pos=" + this._formatTicketVec(nearestAuth.position) + " active=" + nearestAuth.active);
+        lines.push("Nearest Auth Dist: xz=" + nearestAuth.distanceXZ.toFixed(2) + " vertical=" + nearestAuth.verticalDistance.toFixed(2) + " within=" + nearestAuth.withinRange);
+    } else {
+        lines.push("Nearest Auth Ticket: none");
+    }
+    if (nearestVisual) {
+        lines.push("Nearest Visual Clone: " + nearestVisual.id + " pos=" + this._formatTicketVec(nearestVisual.position) + " xz=" + nearestVisual.distanceXZ.toFixed(2));
+    } else {
+        lines.push("Nearest Visual Clone: none");
+    }
+    lines.push("_checkCollects sent request: " + (this._lastCheckCollectDebug ? String(this._lastCheckCollectDebug.sentRequest) : "n/a") + (checkAgeMs !== null ? " (" + checkAgeMs + "ms ago)" : ""));
+    lines.push("_checkCollects detail: " + (this._lastCheckCollectDebug ? JSON.stringify(this._lastCheckCollectDebug) : "none"));
+    lines.push("Last Collect Request: " + (this._lastCollectRequest ? JSON.stringify(this._lastCollectRequest) : "none"));
+    lines.push("Last Collect Success: " + (this._lastCollectSuccess ? JSON.stringify(this._lastCollectSuccess) : "none"));
+    var reject = this._lastCollectRejection || (this.networkClient && this.networkClient.getLastTicketCollectRejected ? this.networkClient.getLastTicketCollectRejected() : null);
+    lines.push("Last Collect Rejection: " + (reject ? JSON.stringify(reject) : "none"));
+    lines.push("Last Collect Debug: " + (this._lastCollectDebug ? JSON.stringify(this._lastCollectDebug) : "none"));
     lines.push("Ticket IDs: " + (ticketIds.length ? ticketIds.join(", ") : "none"));
     this._debugOverlay.textContent = lines.join("\n");
 };
@@ -400,10 +527,13 @@ TicketPickupManager.prototype._onDebugKeyDown = function (evt) {
 
     if (evt.key === "t" || evt.key === "T") {
         var tickets = this.networkClient && this.networkClient.getTicketsState ? this.networkClient.getTicketsState() : {};
-        console.log("[Tickets] Debug snapshot", {
+        var localPosition = this.localPlayerEntity ? this.localPlayerEntity.getPosition() : null;
+        var snapshot = {
             spawnPositions: this._spawnPositions,
             knownTickets: tickets,
             ticketEntities: Object.keys(this._ticketEntities),
+            nearestAuthoritativeTicket: this._getNearestAuthoritativeTicket(localPosition, tickets),
+            nearestVisualTicket: this._getNearestVisualTicket(localPosition),
             roomState: {
                 hasNetworkClient: !!this.networkClient,
                 hasRoom: !!(this.networkClient && this.networkClient.room),
@@ -413,7 +543,15 @@ TicketPickupManager.prototype._onDebugKeyDown = function (evt) {
             lastSpawnSendResult: this._lastSpawnSendResult,
             lastWarning: this._lastWarning,
             requestedTickets: Object.keys(this._requested),
-            lastCollectDebug: this._lastCollectDebug || (this.networkClient && this.networkClient.getLastTicketCollectRejected ? this.networkClient.getLastTicketCollectRejected() : null)
-        });
+            lastCheckCollectDebug: this._lastCheckCollectDebug,
+            lastCollectRequest: this._lastCollectRequest,
+            lastCollectSuccess: this._lastCollectSuccess,
+            lastCollectRejection: this._lastCollectRejection || (this.networkClient && this.networkClient.getLastTicketCollectRejected ? this.networkClient.getLastTicketCollectRejected() : null),
+            lastCollectDebug: this._lastCollectDebug
+        };
+        console.log("[Tickets] Debug snapshot", snapshot);
+        this._debugEnabled = true;
+        this._debugSnapshotMessage = "Debug snapshot logged to console at " + new Date().toLocaleTimeString();
+        this._updateDebugOverlay();
     }
 };
