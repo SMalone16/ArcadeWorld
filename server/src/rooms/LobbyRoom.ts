@@ -23,11 +23,15 @@ type ProfileMessage = {
 type Vec3 = { x: number; y: number; z: number };
 
 type TicketSpawnConfigMessage = { positions?: Vec3[] | null };
-type TicketCollectRequestMessage = { ticketId?: string };
+type TicketCollectRequestMessage = {
+  ticketId?: string;
+  playerPosition?: Vec3 | null;
+};
 
 const TICKET_SPAWN_COUNT = 16;
 const TICKET_ACTIVE_COUNT = 10;
 const TICKET_COLLECT_DISTANCE = 2.5;
+const TICKET_COLLECT_VERTICAL_TOLERANCE = 3;
 const TICKET_RESPAWN_MIN_MS = 5000;
 const TICKET_RESPAWN_MAX_MS = 10000;
 
@@ -177,7 +181,10 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
 
   private lastRoundTeams = new Map<string, ManhuntTeam>();
   private ticketSpawnPositions: Vec3[] = [];
-  private ticketRespawnTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private ticketRespawnTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
 
   static logManhuntStartupConfig(): void {
     console.log(
@@ -207,16 +214,25 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
       player.name = sanitizeName(message?.name, player.name);
       player.color = sanitizeColor(message?.color, player.color);
       player.hatId = sanitizeHatId(message?.hatId, player.hatId);
-      player.tickets = this.sanitizeTicketCount(message?.savedTickets, player.tickets);
+      player.tickets = this.sanitizeTicketCount(
+        message?.savedTickets,
+        player.tickets,
+      );
     });
 
-    this.onMessage("tickets:spawnConfig", (client, message: TicketSpawnConfigMessage) => {
-      this.handleTicketSpawnConfig(client, message);
-    });
+    this.onMessage(
+      "tickets:spawnConfig",
+      (client, message: TicketSpawnConfigMessage) => {
+        this.handleTicketSpawnConfig(client, message);
+      },
+    );
 
-    this.onMessage("tickets:collectRequest", (client, message: TicketCollectRequestMessage) => {
-      this.handleTicketCollectRequest(client, message);
-    });
+    this.onMessage(
+      "tickets:collectRequest",
+      (client, message: TicketCollectRequestMessage) => {
+        this.handleTicketCollectRequest(client, message);
+      },
+    );
 
     this.onMessage("manhunt:startRequest", (client) => {
       this.handleManhuntStartRequest(client);
@@ -1057,7 +1073,10 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     return Math.max(0, Math.floor(value as number));
   }
 
-  private handleTicketSpawnConfig(client: Client, message: TicketSpawnConfigMessage): void {
+  private handleTicketSpawnConfig(
+    client: Client,
+    message: TicketSpawnConfigMessage,
+  ): void {
     const positions = message?.positions;
     const receivedCount = Array.isArray(positions) ? positions.length : 0;
 
@@ -1074,7 +1093,9 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     }
 
     if (!Array.isArray(positions) || positions.length !== TICKET_SPAWN_COUNT) {
-      console.warn(`[Tickets] Rejected spawn config count from ${client.sessionId}. received=${receivedCount}`);
+      console.warn(
+        `[Tickets] Rejected spawn config count from ${client.sessionId}. received=${receivedCount}`,
+      );
       client.send("tickets:spawnConfigResult", {
         accepted: false,
         reason: "rejected-invalid-count",
@@ -1087,7 +1108,9 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     }
 
     if (positions.some((position) => !isFiniteVec3(position))) {
-      console.warn(`[Tickets] Rejected spawn config invalid position payload from ${client.sessionId}`);
+      console.warn(
+        `[Tickets] Rejected spawn config invalid position payload from ${client.sessionId}`,
+      );
       client.send("tickets:spawnConfigResult", {
         accepted: false,
         reason: "rejected-invalid-positions",
@@ -1100,7 +1123,9 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     }
 
     this.ticketSpawnPositions = positions.map(copyVec3);
-    console.log(`[Tickets] Accepted spawn config with ${positions.length} positions.`);
+    console.log(
+      `[Tickets] Accepted spawn config with ${positions.length} positions.`,
+    );
     this.seedInitialTickets();
 
     client.send("tickets:spawnConfigResult", {
@@ -1114,19 +1139,23 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
   }
 
   private seedInitialTickets(): void {
-    const shuffled = [...Array(TICKET_SPAWN_COUNT).keys()].sort(() => Math.random() - 0.5);
+    const shuffled = [...Array(TICKET_SPAWN_COUNT).keys()].sort(
+      () => Math.random() - 0.5,
+    );
     for (let i = 0; i < TICKET_ACTIVE_COUNT; i++) {
       const spawnIndex = shuffled[i];
       const pos = this.ticketSpawnPositions[spawnIndex];
       const ticket = new TicketPickupState();
       ticket.id = `ticket-${i}`;
       ticket.spawnIndex = spawnIndex;
-      ticket.x = pos.x; ticket.y = pos.y; ticket.z = pos.z;
+      ticket.x = pos.x;
+      ticket.y = pos.y;
+      ticket.z = pos.z;
       ticket.active = true;
       ticket.version = 1;
       this.state.tickets.set(ticket.id, ticket);
     }
-    console.log('[Tickets] Spawned 10 active tickets.');
+    console.log("[Tickets] Spawned 10 active tickets.");
   }
 
   private getActiveTicketCount(): number {
@@ -1137,25 +1166,141 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
     return count;
   }
 
-  private handleTicketCollectRequest(client: Client, message: TicketCollectRequestMessage): void {
+  private handleTicketCollectRequest(
+    client: Client,
+    message: TicketCollectRequestMessage,
+  ): void {
     const player = this.state.players.get(client.sessionId);
-    const ticket = message?.ticketId ? this.state.tickets.get(message.ticketId) : undefined;
-    if (!player || !ticket || !ticket.active) return;
-    const playerPos = { x: player.x, y: player.y, z: player.z };
+    const requestedTicketId =
+      typeof message?.ticketId === "string" ? message.ticketId : "";
+
+    if (!player) {
+      this.rejectTicketCollect(client, requestedTicketId, "missing-player");
+      return;
+    }
+
+    // The client also sends a normal movement packet immediately before this request.
+    // Copying this finite position into the authoritative room state keeps ticket
+    // validation from using a stale previous patch when both messages arrive together.
+    if (isFiniteVec3(message?.playerPosition) && this.canPlayerMove(player)) {
+      player.x = message.playerPosition.x;
+      player.y = message.playerPosition.y;
+      player.z = message.playerPosition.z;
+    }
+
+    const ticket = requestedTicketId
+      ? this.state.tickets.get(requestedTicketId)
+      : undefined;
+    if (!requestedTicketId) {
+      this.rejectTicketCollect(
+        client,
+        requestedTicketId,
+        "missing-ticket-id",
+        player,
+      );
+      return;
+    }
+    if (!ticket) {
+      this.rejectTicketCollect(
+        client,
+        requestedTicketId,
+        "missing-ticket",
+        player,
+      );
+      return;
+    }
+    if (!ticket.active) {
+      this.rejectTicketCollect(
+        client,
+        requestedTicketId,
+        "inactive-ticket",
+        player,
+        ticket,
+      );
+      return;
+    }
+
+    const playerPos = this.playerPosition(player);
     const ticketPos = { x: ticket.x, y: ticket.y, z: ticket.z };
-    if (distance(playerPos, ticketPos) > TICKET_COLLECT_DISTANCE) return;
+    const fullDistance = distance(playerPos, ticketPos);
+    const xzDistance = distanceXZ(playerPos, ticketPos);
+    const verticalDistance = Math.abs(playerPos.y - ticketPos.y);
+
+    if (
+      xzDistance > TICKET_COLLECT_DISTANCE ||
+      verticalDistance > TICKET_COLLECT_VERTICAL_TOLERANCE
+    ) {
+      this.rejectTicketCollect(
+        client,
+        requestedTicketId,
+        "too-far",
+        player,
+        ticket,
+      );
+      return;
+    }
+
     ticket.active = false;
     ticket.version += 1;
     player.tickets += 1;
-    console.log(`[Tickets] ${client.sessionId} collected ${ticket.id} -> ${player.tickets}`);
-    client.send('tickets:collected', { ticketId: ticket.id, x: ticket.x, y: ticket.y, z: ticket.z, tickets: player.tickets });
+    console.log(
+      `[Tickets] ${client.sessionId} collected ${ticket.id} -> ${player.tickets} ` +
+        `(distance=${fullDistance.toFixed(2)}, xz=${xzDistance.toFixed(2)}, y=${verticalDistance.toFixed(2)})`,
+    );
+    client.send("tickets:collected", {
+      ticketId: ticket.id,
+      x: ticket.x,
+      y: ticket.y,
+      z: ticket.z,
+      tickets: player.tickets,
+    });
     this.scheduleTicketRespawn(ticket.id);
+  }
+
+  private rejectTicketCollect(
+    client: Client,
+    ticketId: string,
+    reason: string,
+    player?: PlayerState,
+    ticket?: TicketPickupState,
+  ): void {
+    const playerPos = player ? this.playerPosition(player) : null;
+    const ticketPos = ticket ? { x: ticket.x, y: ticket.y, z: ticket.z } : null;
+    const fullDistance =
+      playerPos && ticketPos ? distance(playerPos, ticketPos) : null;
+    const xzDistance =
+      playerPos && ticketPos ? distanceXZ(playerPos, ticketPos) : null;
+    const verticalDistance =
+      playerPos && ticketPos ? Math.abs(playerPos.y - ticketPos.y) : null;
+    const payload = {
+      reason,
+      ticketId,
+      playerPosition: playerPos,
+      ticketPosition: ticketPos,
+      distance: fullDistance,
+      distanceXZ: xzDistance,
+      verticalDistance,
+      collectDistance: TICKET_COLLECT_DISTANCE,
+      verticalTolerance: TICKET_COLLECT_VERTICAL_TOLERANCE,
+      active: ticket ? ticket.active : null,
+      hasRoomState: !!this.state,
+      timestamp: Date.now(),
+    };
+
+    console.warn(
+      `[Tickets] Collect rejected for ${client.sessionId}: ${JSON.stringify(payload)}`,
+    );
+    client.send("tickets:collectRejected", payload);
   }
 
   private scheduleTicketRespawn(ticketId: string): void {
     const existing = this.ticketRespawnTimers.get(ticketId);
     if (existing) clearTimeout(existing);
-    const delay = TICKET_RESPAWN_MIN_MS + Math.floor(Math.random() * (TICKET_RESPAWN_MAX_MS - TICKET_RESPAWN_MIN_MS + 1));
+    const delay =
+      TICKET_RESPAWN_MIN_MS +
+      Math.floor(
+        Math.random() * (TICKET_RESPAWN_MAX_MS - TICKET_RESPAWN_MIN_MS + 1),
+      );
     const timer = setTimeout(() => {
       this.ticketRespawnTimers.delete(ticketId);
       this.respawnTicket(ticketId);
@@ -1166,16 +1311,25 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
 
   private respawnTicket(ticketId: string): void {
     const ticket = this.state.tickets.get(ticketId);
-    if (!ticket || this.ticketSpawnPositions.length !== TICKET_SPAWN_COUNT) return;
+    if (!ticket || this.ticketSpawnPositions.length !== TICKET_SPAWN_COUNT)
+      return;
     const used = new Set<number>();
-    this.state.tickets.forEach((t) => { if (t.active) used.add(t.spawnIndex); });
+    this.state.tickets.forEach((t) => {
+      if (t.active) used.add(t.spawnIndex);
+    });
     if (used.size >= TICKET_ACTIVE_COUNT) return;
     const empty: number[] = [];
-    for (let i=0;i<TICKET_SPAWN_COUNT;i++) if (!used.has(i)) empty.push(i);
+    for (let i = 0; i < TICKET_SPAWN_COUNT; i++)
+      if (!used.has(i)) empty.push(i);
     if (empty.length === 0) return;
     const spawnIndex = empty[Math.floor(Math.random() * empty.length)];
     const pos = this.ticketSpawnPositions[spawnIndex];
-    ticket.spawnIndex = spawnIndex; ticket.x = pos.x; ticket.y = pos.y; ticket.z = pos.z; ticket.active = true; ticket.version += 1;
+    ticket.spawnIndex = spawnIndex;
+    ticket.x = pos.x;
+    ticket.y = pos.y;
+    ticket.z = pos.z;
+    ticket.active = true;
+    ticket.version += 1;
     console.log(`[Tickets] Respawned ${ticketId} at spawn ${spawnIndex}`);
   }
 }
