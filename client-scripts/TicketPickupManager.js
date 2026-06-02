@@ -460,7 +460,7 @@ TicketPickupManager.prototype._updateDebugOverlay = function () {
 
     var lines = [];
     lines.push("[Ticket Debug]");
-    lines.push("Keys: F8 toggle overlay, T log console snapshot + show this overlay");
+    lines.push("Keys: 2 toggle overlay (F8 backup), T log console snapshot + show this overlay");
     if (this._debugSnapshotMessage) {
         lines.push(this._debugSnapshotMessage);
     }
@@ -514,14 +514,32 @@ TicketPickupManager.prototype._removeDebugOverlay = function () {
     this._debugOverlay = null;
 };
 
+TicketPickupManager.prototype._isDebugKeyInputElement = function (target) {
+    if (!target) {
+        return false;
+    }
+
+    if (target.isContentEditable) {
+        return true;
+    }
+
+    var tagName = target.tagName ? String(target.tagName).toLowerCase() : "";
+    return tagName === "input" || tagName === "textarea" || tagName === "select";
+};
+
 TicketPickupManager.prototype._onDebugKeyDown = function (evt) {
-    if (!evt || evt.repeat) {
+    if (!evt || evt.repeat || this._isDebugKeyInputElement(evt.target)) {
         return;
     }
 
-    if (evt.key === "F8") {
+    var isDigit2 = evt.key === "2" || evt.code === "Digit2";
+    if (isDigit2 || evt.key === "F8") {
         this._debugEnabled = !this._debugEnabled;
-        console.log("[Tickets] Debug overlay toggled", this._debugEnabled);
+        if (isDigit2) {
+            console.log("[Tickets] Debug overlay toggled by 2 key: " + this._debugEnabled);
+        } else {
+            console.log("[Tickets] Debug overlay toggled by F8 key: " + this._debugEnabled);
+        }
         return;
     }
 
