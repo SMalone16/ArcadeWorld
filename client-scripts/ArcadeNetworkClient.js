@@ -67,6 +67,7 @@ ArcadeNetworkClient.prototype.initialize = function () {
     manhuntStateChanged: [],
     ticketCollected: [],
     ticketCollectRejected: [],
+    ticketMiniGameAwarded: [],
     ticketLeaderboardChanged: [],
     ticketSpawnConfigResult: []
   };
@@ -93,6 +94,7 @@ ArcadeNetworkClient.prototype.initialize = function () {
   this._knownTickets = {};
   this._lastTicketSpawnConfigResult = null;
   this._lastTicketCollectRejected = null;
+  this._lastMiniGameTicketAward = null;
 
   var cfg = window.ArcadeConfig || {};
   this._serverUrl = this.serverUrl || cfg.SERVER_URL || "";
@@ -781,6 +783,12 @@ ArcadeNetworkClient.prototype._bindTicketCollectionMessages = function () {
     console.warn("[Tickets] Collect rejected", payload || null);
     this._emit("ticketCollectRejected", payload || null);
   }.bind(this));
+  this.room.onMessage("tickets:miniGameAwarded", function (payload) {
+    this._lastMiniGameTicketAward = payload || null;
+    if (payload && typeof payload.totalTickets === "number") { this._localTickets = Math.max(0, Math.floor(payload.totalTickets)); this._saveTickets(this._localTickets); }
+    this._emit("ticketMiniGameAwarded", payload || {});
+    this._emit("ticketLeaderboardChanged", this.getTicketLeaderboard());
+  }.bind(this));
 };
 
 
@@ -799,6 +807,18 @@ ArcadeNetworkClient.prototype._bindTicketStateCallbacks = function ($) {
 };
 ArcadeNetworkClient.prototype.sendTicketSpawnConfig = function (spawnPositions) { if (!this.room) return false; this.room.send("tickets:spawnConfig", { positions: spawnPositions || [] }); return true; };
 ArcadeNetworkClient.prototype.sendTicketCollectRequest = function (ticketId, playerPosition) { if (!this.room || !ticketId) return false; var payload = { ticketId: ticketId }; if (playerPosition) { payload.playerPosition = { x: playerPosition.x, y: playerPosition.y, z: playerPosition.z }; } this.room.send("tickets:collectRequest", payload); return true; };
+
+ArcadeNetworkClient.prototype.sendMiniGameTicketAward = function (source, score, tickets) {
+  if (!this.room || !this.room.send) return false;
+  this.room.send("tickets:awardFromMiniGame", {
+    source: source || "ticket-snake",
+    score: Math.max(0, Math.floor(score || 0)),
+    tickets: Math.max(1, Math.min(10, Math.floor(tickets || 1)))
+  });
+  return true;
+};
+ArcadeNetworkClient.prototype.onMiniGameTicketAwarded = function (callback) { this.onEvent("ticketMiniGameAwarded", callback); };
+ArcadeNetworkClient.prototype.getLastMiniGameTicketAward = function () { return this._lastMiniGameTicketAward || null; };
 ArcadeNetworkClient.prototype.getTicketLeaderboard = function () { var rows=[]; for (var id in this._knownPlayers) { if (Object.prototype.hasOwnProperty.call(this._knownPlayers,id)) { var p=this._toPlayerPayload(this._knownPlayers[id],id); rows.push({ sessionId:id, name:p.name||("Player "+id.slice(0,4)), tickets:p.tickets||0, isLocal:id===this.sessionId }); } } rows.sort(function(a,b){ return b.tickets-a.tickets; }); return rows; };
 ArcadeNetworkClient.prototype.getLocalTickets = function () { return this._localTickets || 0; };
 ArcadeNetworkClient.prototype.onTicketCollected = function (callback) { this.onEvent("ticketCollected", callback); };

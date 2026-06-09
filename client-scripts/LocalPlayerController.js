@@ -215,6 +215,7 @@ LocalPlayerController.prototype.initialize = function () {
   this.sprintRechargeDelayTimer = 0;
   this.sprintDepletedPenaltyActive = false;
   this._shiftWasReleasedAfterDepletion = true;
+  this._miniGameInputPaused = false;
   this._groundRaycastFilterBound = this._isValidGroundHit.bind(this);
 
   this._onMouseMoveBound = this._onMouseMove.bind(this);
@@ -360,7 +361,16 @@ LocalPlayerController.prototype._onStartGame = function (profile) {
 };
 
 LocalPlayerController.prototype._isPlaying = function () {
-  return this._gameState === "playing" || this.app.arcadeGameState === "playing" || window.ArcadeWorldGameState === "playing";
+  return !this._miniGameInputPaused && window.ArcadeMiniGameActive !== true && (this._gameState === "playing" || this.app.arcadeGameState === "playing" || window.ArcadeWorldGameState === "playing");
+};
+
+LocalPlayerController.prototype.setMiniGameInputPaused = function (paused) {
+  this._miniGameInputPaused = paused === true;
+  if (this._miniGameInputPaused) {
+    this._releasePointerLock();
+    this._stopMovementVelocity();
+    this._cancelJumpCharge();
+  }
 };
 
 LocalPlayerController.prototype._releasePointerLock = function () {
