@@ -1,26 +1,37 @@
 # Arcade World: Student-Friendly Explanation
 
-Arcade World is a shared online game space.
+Arcade World is a shared online arcade space for classmates.
 
 ## What you can do today
 
-- Join the same lobby as classmates.
-- Walk around the arcade map.
-- See other players moving in real time.
+- Join the same lobby as other players during a PlayCanvas multiplayer playtest.
+- Choose a display name, body color, and hat before entering.
+- Walk, look around, sprint, and jump.
+- See other players moving around with their names and avatar choices.
+- Play a Manhunt-style round: gather at Home Base, start with **M**, and tag as a seeker with **E**.
+- Collect prototype tickets in free roam when the ticket setup is enabled.
 
-## How it works (simple)
+There is also a static local prototype that developers can run without the multiplayer server. That version uses a mock remote player so code can be tested quickly.
 
-1. Your browser sends your position to a game server.
-2. The server shares that position with everyone else.
-3. Your browser draws placeholder avatars for other players.
+## How multiplayer works
 
-## Why this is version 1
+1. Your browser connects to the game server.
+2. Your browser sends your position and profile choices to the server.
+3. The server shares player, Manhunt, and ticket state with everyone in the room.
+4. Each browser draws the other players and updates the UI.
 
-We are focusing on one core feature first: **live multiplayer movement**.
+## Why some parts are prototypes
 
-## Coming later (TODO)
+The team is building in slices. The most important systems first are:
 
-- Earn tickets
-- Visit shop
-- Play mini-games (including hide & seek)
-- Customize avatars
+- shared lobby presence,
+- simple safe movement,
+- classroom-friendly Manhunt rules,
+- and a first ticket pickup loop.
+
+## Coming later
+
+- More arcade machines and real mini-game handoffs.
+- A shop where tickets can buy cosmetics.
+- Private classroom room codes and moderation tools.
+- More polished avatars, art, and sound.

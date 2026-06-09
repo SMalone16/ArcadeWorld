@@ -1,48 +1,68 @@
-# Arcade World Architecture (Current Slice)
+# Arcade World Architecture (Current State)
 
-## High-level split
+Arcade World currently has three major areas:
 
-- **`src/scenes`** owns static, visual scene assembly (room, lights, cabinets, camera roots).
-- **`src/network`** owns multiplayer lifecycle concerns (join/leave, player spawn/despawn mappings).
-- **`src/events`** owns lobby-wide event rules such as Manhunt rounds, scoring, safe-zone checks, and tag input.
-- **`server/`** owns authoritative room state and connected client presence.
+1. **Static prototype client (`src/`)** - TypeScript + Vite + PlayCanvas code that can be hosted as static files and uses a local mock network adapter.
+2. **PlayCanvas Editor scripts (`client-scripts/`)** - JavaScript scripts copied into a PlayCanvas Editor project for classroom multiplayer playtests.
+3. **Colyseus server (`server/`)** - Node/TypeScript room server that owns shared multiplayer state for the PlayCanvas Editor playtest path.
 
-This separation keeps networking logic out of render-only scene scripts.
+The split is intentional: the static client remains GitHub-Pages-friendly, while real-time multiplayer runs in a separate long-lived server process.
 
-## Server responsibilities (`/server`)
+## Runtime paths
 
-- Host room `arcade_lobby`
-- Track connected players in room state
-- Accept movement updates (`move` message)
-- Sync x/y/z (+ yaw) to all clients
-- Remove players on disconnect
+### Static Vite prototype (`src/`)
 
-## Client responsibilities (`/src`)
+- `main.ts` creates a PlayCanvas canvas and starts `ArcadeGame`.
+- `game/ArcadeGame.ts` orchestrates the app: scene creation, mock network join, local player controller, HUD, cabinet prompts, and local Manhunt input.
+- `scenes/LobbyScene.ts` builds a simple lobby, arcade cabinets, spawn points, lights, walls/floor, and a visible Manhunt safe-zone marker.
+- `network/LocalMockNetworkClient.ts` provides the local-only network abstraction. It spawns a local player and a synthetic remote proxy, exposes player IDs/entities, and feeds transform snapshots for interpolation testing.
+- `events/ManhuntRoundManager.ts` runs the TypeScript local Manhunt prototype. This is useful for static-client architecture work, but it is not the authoritative multiplayer Manhunt used by the PlayCanvas classroom path.
+- `minigames/registry.ts` keeps mini-game lookup modular. The default registered mini-game is still an example placeholder.
 
-- `scenes/LobbyScene.ts`: build static lobby + provide `playersRoot` and `SpawnPoint` transforms for network joins.
-- `entities/PlayerPrefab.ts`: reusable player entity factory used for local and remote players.
-- `network/LocalMockNetworkClient.ts`: join flow picks free spawn transforms (random from free points), applies consistent initial rotation, falls back to farthest/round-robin when saturated, stores `clientId -> Entity`, exposes current player ids for event systems, and despawns on leave/disconnect.
-- `entities/PlayerController.ts`: local input, sprint/jump movement feel, camera look, and visual-only squash/stretch on the `AvatarVisual` child.
-- `game/ArcadeGame.ts`: orchestration only; requests joins, reads local player entity from the network layer, wires HUD updates, forwards Manhunt start/reset input, and sends local-authoritative transform snapshots at a fixed rate with threshold guardrails.
-- `events/ManhuntRoundManager.ts`: central Manhunt vertical slice with `lobby -> countdown -> hidingPhase -> seekingPhase -> roundOver`, one seeker assignment, hider safe scoring, seeker tag scoring, survivor/failed-hider end scoring, debug logs, and lobby resets.
-- `ui/ManhuntHud.ts`: simple DOM HUD for round state, team, timer, hider counts, controls, and results.
+### PlayCanvas Editor client (`client-scripts/`)
 
-## Why this helps students
+These files are plain JavaScript because they are uploaded to PlayCanvas Editor assets:
 
-- Each module has one clear purpose.
-- Networking and rendering responsibilities remain easy to trace.
-- Replacing mock networking with Colyseus remains isolated in `src/network`.
+- `ArcadeNetworkClient.js` connects to Colyseus, joins `arcade_lobby`, sends movement/profile/ticket/Manhunt messages, tracks room state, applies explicit server teleports, and exposes callbacks/getters for other scripts.
+- `LocalPlayerController.js` handles first-person local movement, sprint, jump, pointer lock, and input lockouts while onboarding or during Manhunt-controlled phases/statuses.
+- `RemotePlayerManager.js` creates/removes/interpolates remote avatars, applies appearance, projects DOM nametags, and hides nameplates according to Manhunt visibility rules.
+- `PregameOverlay.js` owns the pre-game profile picker for name, body color, and hat.
+- `PlayerAppearance.js` centralizes avatar tint/hat application so local and remote visuals use the same rules.
+- `ManhuntManager.js` renders Manhunt HUD layers, sends start/tag/debug requests, handles spectator/camera behavior, and plays optional tag feedback.
+- `ManhuntMapConfig.js` sends PlayCanvas marker positions to the server while in the lobby phase. This is a development/classroom bridge, not production-trusted map loading.
+- `TicketPickupManager.js`, `TicketLeaderboard.js`, and `TicketCollectibleVisual.js` implement the free-roam ticket pickup prototype UI/visuals around server-owned ticket state.
+- `NetworkDebugOverlay.js` renders connection/session/remote-visibility diagnostics for playtests.
 
-## Explicit non-goals for this slice
+## Server responsibilities (`server/`)
 
-- Full ticket economy
-- Shop/cosmetic purchasing
-- Arcade cabinet mini-game launch integration
-- Advanced hiding props or map-specific hiding-place logic
+- Start an HTTP/Colyseus process on `PORT` (default `2567`) and expose `/health`.
+- Define the shared room `arcade_lobby`.
+- Track `players`, `manhunt`, and `tickets` in Colyseus schema state.
+- Accept player profile updates (`profile`) for display name, color, hat, saved ticket count, and device ID.
+- Accept movement updates (`move`) and sync x/y/z/rotation to other clients when the player is allowed to move.
+- Run server-authoritative Manhunt state:
+  - phases: `lobby`, `teamReveal`, `spawnCountdown`, `activeRound`, `roundOver`.
+  - 5-second team reveal, 5-second spawn countdown, 60-second active round, and 30-second round-over display.
+  - balanced seeker/hider assignment, movement locks, explicit server teleports, safe-zone scoring, tag scoring, survivor points, and reset to lobby.
+- Accept development Manhunt map config (`manhunt:mapConfig`) only while in the lobby phase.
+- Run server-owned ticket pickup validation:
+  - exactly 16 configured spawn positions.
+  - 10 active tickets initially.
+  - 2.5-unit XZ collection distance and 3-unit vertical tolerance.
+  - collected tickets are removed and respawned with fresh IDs after 5-10 seconds.
+- Remove players on disconnect and end/reset round state as needed.
 
-## Future expansion TODO
+## Important boundaries
 
-- Move server to dedicated production hosting.
-- Add authentication and moderation.
-- Add anti-cheat validation.
-- Add mini-game room transitions.
+- Rendering/scene setup should not own networking rules.
+- Networking code should expose state and events to UI/gameplay systems instead of directly embedding render behavior.
+- Cabinet entity definitions should not hardcode mini-game-specific behavior; use the mini-game registry and interaction abstractions.
+- Production multiplayer must not trust arbitrary client-sent map coordinates. The current Manhunt marker bridge exists to speed up classroom playtests.
+
+## Current non-goals
+
+- Production-scale hosting.
+- Authentication/accounts and classroom moderation.
+- Shop/cosmetic purchasing.
+- Persistent cloud progression.
+- Fully automated multiplayer browser smoke tests.

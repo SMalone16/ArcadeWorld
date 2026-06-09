@@ -1,30 +1,40 @@
 # Arcade World (PlayCanvas + Colyseus)
 
-Arcade World is a **live online virtual arcade for students**.
+Arcade World is a **school-friendly, browser-based virtual arcade**. The current project has two complementary client paths:
 
-This repository now includes:
-- A **Colyseus multiplayer server** (`/server`) for the shared lobby.
-- **PlayCanvas-ready client scripts** (`/client-scripts`) you upload into your existing PlayCanvas Editor project.
-- Setup/testing docs for **GitHub Codespaces**.
+- **PlayCanvas Editor playtest path (`client-scripts/`)**: upload these JavaScript scripts into an existing PlayCanvas scene and connect to the Colyseus server in `/server` for real shared-lobby playtests.
+- **Static Vite/TypeScript prototype (`src/`)**: a GitHub-Pages-compatible local scaffold that builds a simple lobby, mock players, cabinet interactions, and a local Manhunt prototype for architecture/testing without needing the PlayCanvas Editor.
 
 ---
 
-## What works in this vertical slice
+## What works now
 
-1. Players join one shared lobby room (`arcade_lobby`).
-2. Multiple players connect to the same Colyseus server.
-3. Each player moves in the PlayCanvas scene with WASD.
-4. Other players appear as simple placeholder avatars.
-5. Movement is synchronized through the server.
+### PlayCanvas + Colyseus classroom playtest
 
-### Not implemented yet (intentionally)
+1. Players join the shared Colyseus room named `arcade_lobby`.
+2. Each player chooses a display name, body color, and hat in the pre-game overlay.
+3. Local movement uses WASD, mouse look, Shift sprint, and Space jump.
+4. Remote players spawn, despawn, interpolate, show DOM nametags, and use synchronized appearance data.
+5. The server tracks player room state, transform snapshots, profile data, Manhunt state, and ticket pickups.
+6. Server-authoritative Manhunt rounds can be started at Home Base with **M** when at least two players are connected.
+7. A free-roam ticket pickup prototype supports 16 configured spawn candidates, 10 active tickets, server-validated collection, short respawns, and a ticket leaderboard/debug overlay.
 
-- Tickets economy
-- Shop
-- Arcade machine gameplay handoff
-- Hide & Seek mode
+### Static Vite/TypeScript prototype
 
-These are explicitly deferred with TODO markers in docs/scripts.
+1. `npm run dev` starts a static PlayCanvas app served by Vite.
+2. `src/scenes/LobbyScene.ts` builds a simple 2.5D lobby with cabinets, spawn points, and a Manhunt safe-zone marker.
+3. `src/network/LocalMockNetworkClient.ts` spawns a local player plus a synthetic remote proxy so movement/interpolation and UI wiring can be exercised without a WebSocket server.
+4. The mini-game registry currently contains an example mini-game placeholder.
+
+---
+
+## Not implemented yet / intentionally incomplete
+
+- Production hosting for the multiplayer server.
+- Authentication, moderation tools, private classroom room codes, and reconnect/rehydration flows.
+- Shop/cosmetic purchasing and persistent accounts.
+- Real cabinet-to-mini-game handoff in the PlayCanvas Editor scene.
+- Server-authoritative map loading for Manhunt; the current PlayCanvas marker bridge is intentionally a classroom/dev convenience.
 
 ---
 
@@ -33,34 +43,57 @@ These are explicitly deferred with TODO markers in docs/scripts.
 ```text
 .
 ├── AGENTS.md
-├── client-scripts/
+├── client-scripts/              # JavaScript files uploaded into PlayCanvas Editor
 │   ├── ArcadeConfig.js
 │   ├── ArcadeNetworkClient.js
 │   ├── LocalPlayerController.js
 │   ├── RemotePlayerManager.js
-│   └── README.md
-├── docs/
-│   ├── ARCHITECTURE.md
-│   ├── CODESPACES_TESTING.md
-│   ├── PLAYCANVAS_SETUP.md
-│   └── STUDENT_EXPLANATION.md
-└── server/
-    ├── package.json
-    ├── tsconfig.json
-    └── src/
-        ├── index.ts
-        ├── rooms/
-        │   └── LobbyRoom.ts
-        └── schema/
-            ├── ArcadeWorldState.ts
-            └── PlayerState.ts
+│   ├── PlayerAppearance.js
+│   ├── PregameOverlay.js
+│   ├── NetworkDebugOverlay.js
+│   ├── ManhuntManager.js
+│   ├── ManhuntMapConfig.js
+│   ├── TicketPickupManager.js
+│   ├── TicketLeaderboard.js
+│   └── TicketCollectibleVisual.js
+├── docs/                        # Architecture, setup, deployment, and classroom docs
+├── server/                      # Colyseus authoritative room server
+│   └── src/
+│       ├── index.ts
+│       ├── rooms/LobbyRoom.ts
+│       └── schema/
+└── src/                         # Static Vite/TypeScript prototype client
+    ├── entities/
+    ├── events/
+    ├── game/
+    ├── minigames/
+    ├── network/
+    ├── scenes/
+    └── ui/
 ```
 
 ---
 
-## Quick start (Codespaces server test flow)
+## Quick start: static prototype
 
-### 1) Run server in GitHub Codespaces
+```bash
+npm install
+npm run dev
+```
+
+Open the Vite URL in a browser. This path uses mock networking and is suitable for checking the static lobby scaffold and TypeScript build.
+
+Build the static client:
+
+```bash
+npm run build
+```
+
+---
+
+## Quick start: Codespaces multiplayer playtest
+
+### 1) Run the server
 
 ```bash
 cd server
@@ -68,17 +101,18 @@ npm install
 npm run dev
 ```
 
-Expected output includes server listening on **port 2567**.
+Expected output includes Colyseus listening on **port 2567** and room `arcade_lobby`.
 
 ### 2) Forward port 2567
 
 In Codespaces:
+
 1. Open the **PORTS** tab.
 2. Find port `2567`.
-3. Set visibility to **Public** or **Organization** (school policy dependent).
-4. Copy forwarded URL (usually `https://<name>-2567.app.github.dev`).
+3. Set visibility to **Public** or **Organization** depending on school policy.
+4. Copy the forwarded URL, usually `https://<name>-2567.app.github.dev`.
 
-### 3) Convert HTTP URL to WebSocket URL
+### 3) Convert the URL for WebSockets
 
 Convert like this:
 
@@ -86,7 +120,7 @@ Convert like this:
 - becomes
 - `wss://example-2567.app.github.dev`
 
-### 4) Put URL in `client-scripts/ArcadeConfig.js`
+### 4) Put the URL in `client-scripts/ArcadeConfig.js`
 
 ```js
 window.ArcadeConfig = {
@@ -96,43 +130,37 @@ window.ArcadeConfig = {
 };
 ```
 
+For a local server, use `ws://localhost:2567`.
+
 ### 5) Upload scripts into PlayCanvas and attach them
 
-Follow `docs/PLAYCANVAS_SETUP.md` exactly.
+Follow `docs/PLAYCANVAS_SETUP.md` exactly. It includes the required script attributes for networking, profile selection, Manhunt markers, ticket pickups, and debug overlays.
 
 ### 6) Test with two tabs or devices
 
-- Launch PlayCanvas project in Browser Tab A
-- Launch again in Browser Tab B (or second device)
-- Move both players with WASD
-- Confirm each tab sees the other avatar moving
-
----
-
-## Local development (optional)
-
-Run server locally:
-
-```bash
-cd server
-npm install
-npm run dev
-```
-
-Use `ws://localhost:2567` in `ArcadeConfig.js`.
+- Launch the PlayCanvas project in Browser Tab A.
+- Launch it again in Browser Tab B or on a second device.
+- Pick different player profiles.
+- Move both players with WASD.
+- Confirm each tab sees the other avatar moving.
+- Optional: start Manhunt at Home Base with **M**, tag as seeker with **E**, and check ticket pickup/leaderboard behavior.
 
 ---
 
 ## Documentation index
 
-- `docs/PLAYCANVAS_SETUP.md` - exact editor entity/script setup steps
-- `docs/CODESPACES_TESTING.md` - full Codespaces multiplayer test guide
-- `docs/STUDENT_EXPLANATION.md` - classroom-friendly explanation
-- `docs/ARCHITECTURE.md` - boundaries and future expansion plan
+- `docs/ARCHITECTURE.md` - current code boundaries and runtime responsibilities.
+- `docs/PLAYCANVAS_SETUP.md` - exact PlayCanvas Editor entity/script setup steps.
+- `docs/CODESPACES_TESTING.md` - Codespaces multiplayer test guide.
+- `docs/DEPLOYMENT.md` - static client vs long-running WebSocket server deployment guidance.
+- `docs/ROADMAP.md` - current phases and next work.
+- `docs/STUDENT_EXPLANATION.md` - classroom-friendly explanation.
+- `docs/ASSET_PIPELINE.md` - source/runtime asset workflow.
 
 ---
 
 ## Notes for teachers
 
 - PlayCanvas scene visuals remain managed in PlayCanvas Editor.
-- Codespaces is for **today's testing workflow**, not long-term production hosting.
+- Codespaces is useful for development and classroom testing, not long-term production hosting.
+- The client can be statically hosted, but real-time multiplayer requires the Node/Colyseus server to run separately.
