@@ -14,6 +14,9 @@ Upload/copy these files from repo folder `client-scripts/`:
 - `NetworkDebugOverlay.js`
 - `ManhuntManager.js`
 - `ManhuntMapConfig.js`
+- `TicketPickupManager.js`
+- `TicketLeaderboard.js`
+- `TicketCollectibleVisual.js`
 
 ## 2) Add Colyseus client library in PlayCanvas
 
@@ -146,7 +149,7 @@ RemotePlayerTemplate
 ## TODO (future)
 
 - Replace placeholder avatars with student-customizable characters.
-- Add cabinet interactions, tickets, and shop logic.
+- Add production cabinet interactions, shop logic, and persistent account-backed ticket balances.
 
 ## 6) Manhunt / Hide-and-Seek multiplayer setup
 
@@ -179,7 +182,7 @@ Manhunt uses a hybrid classroom-playtest model: local movement is client-authori
 
 - Run the Colyseus server from `/server` so clients join the shared `arcade_lobby` room.
 - The room schema contains `state.manhunt` with phases `lobby`, `teamReveal`, `spawnCountdown`, `activeRound`, and `roundOver`.
-- Timing constants in `server/src/rooms/LobbyRoom.ts` are `TEAM_REVEAL_SECONDS = 5`, `ROUND_START_COUNTDOWN_SECONDS = 5`, `ACTIVE_ROUND_SECONDS = 60`, and `ROUND_OVER_SECONDS = 10`.
+- Timing constants in `server/src/rooms/LobbyRoom.ts` are `TEAM_REVEAL_SECONDS = 5`, `ROUND_START_COUNTDOWN_SECONDS = 5`, `ACTIVE_ROUND_SECONDS = 60`, and `ROUND_OVER_SECONDS = 30`.
 - Each `PlayerState` includes `manhuntTeam`, `manhuntStatus`, `manhuntPoints`, `totalPoints`, `isInManhuntRound`, and `serverTeleportId`.
 - Clients send:
   - `manhunt:startRequest` when the player presses **M** at Home Base during lobby/free roam.
@@ -257,10 +260,10 @@ Production note: this client-sent bridge is intentionally convenient for develop
 - Hold **Shift** while moving to sprint; sprint uses stamina and recharges when not sprinting.
 - Press **Space** to jump.
 
-### After this PR is merged
+### After changing client scripts
 
-- Re-upload the updated client scripts from `client-scripts/` into PlayCanvas, especially `ArcadeNetworkClient.js`, `LocalPlayerController.js`, `RemotePlayerManager.js`, `ManhuntManager.js`, and `ManhuntMapConfig.js`.
-- Re-check the `ManhuntManager.js` script attributes in the Editor after upload because the new camera attributes must be assigned before the classroom playtest.
+- Re-upload any changed files from `client-scripts/` into PlayCanvas before running a classroom playtest.
+- Re-check script attributes in the Editor after upload because newly added attributes may need assignments before Launch.
 
 ## Ticket Pickup Setup (Free Roam)
 1. Create `TicketSpawnRoot` with **exactly 16 enabled child transforms** for ticket spawn candidates.
@@ -268,4 +271,4 @@ Production note: this client-sent bridge is intentionally convenient for develop
 3. Attach `TicketPickupManager` and `TicketLeaderboard` to your NetworkManager/GameModeManager.
 4. Wire script attributes: network manager, local player, spawn root, template, collect radius, optional collect SFX asset.
 5. Optional: add `TicketCollectibleVisual` on the ticket template for bob/rotation.
-6. During ticket playtests, press **F8** to toggle the ticket debug overlay. Press **T** to log a ticket debug snapshot to the browser console and show/update an on-screen line; the overlay includes the nearest authoritative ticket, nearest visual clone, collection distances/tolerances, and recent request/success/rejection details.
+6. During ticket playtests, press **2** to toggle the ticket debug overlay (`F8` remains a backup toggle). Press **T** to log a ticket debug snapshot to the browser console and show/update an on-screen line; the overlay includes the nearest authoritative ticket, nearest visual clone, collection distances/tolerances, and recent request/success/rejection details.

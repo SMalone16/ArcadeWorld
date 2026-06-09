@@ -11,7 +11,11 @@ These scripts are designed to be copied/uploaded into your **existing PlayCanvas
 - `PlayerAppearance.js` - shared helper/script for body color and hat selection
 - `PregameOverlay.js` - DOM pre-game profile picker for name, body color, and hat
 - `NetworkDebugOverlay.js` - temporary DOM overlay for multiplayer playtests
-- `ManhuntManager.js` - client-side PlayCanvas Manhunt vertical slice with round state, tagging, safe-zone scoring, action feed feedback, tag burst FX, and a DOM HUD
+- `ManhuntManager.js` - PlayCanvas Manhunt UI/controller for the server-authoritative round state, tagging requests, safe-zone prompts, action feed feedback, spectator view, tag burst FX, and DOM HUD
+- `ManhuntMapConfig.js` - sends PlayCanvas marker positions to the server during the lobby phase for classroom/dev map setup
+- `TicketPickupManager.js` - clones ticket visuals, requests server-validated collection, and renders ticket debug information
+- `TicketLeaderboard.js` - shows the current room ticket standings
+- `TicketCollectibleVisual.js` - optional bob/rotation visual behavior for ticket templates
 
 ## Free Roam controls
 
@@ -27,7 +31,7 @@ These scripts are designed to be copied/uploaded into your **existing PlayCanvas
 3. Attach scripts exactly as documented in `docs/PLAYCANVAS_SETUP.md`.
 4. During multi-screen tests, add `NetworkDebugOverlay.js` to the same NetworkManager entity so each client reports its connection/session/remote-visibility state on screen.
 5. For the pre-game flow, attach `PregameOverlay.js` to a `PregameUI` entity, set `PregameOverlay.networkClientEntity` to `NetworkManager`, and set `ArcadeNetworkClient.autoConnect=false`.
-6. For Manhunt tests, attach `ManhuntManager.js` to `GameModeManager` or `NetworkManager`, then assign its network manager, remote player manager, local player, spawn marker, and safe-zone marker attributes. Press `M` in the lobby to start/reset and press `E` as the seeker to tag nearby active hiders.
+6. For Manhunt tests, attach `ManhuntManager.js` to `GameModeManager` or `NetworkManager`, then assign its network manager, remote player manager, local player, camera, spectator camera, tag SFX, and safe-zone attributes as needed. Press `M` in the lobby to start/reset and press `E` as the seeker to tag nearby active hiders.
 7. Optional tag sound setup: assign `ManhuntManager.tagSfxEntity` to an entity that has a **Sound** component and a sound slot named `tagPop`. If this entity/slot is not assigned, tag SFX is skipped safely.
 8. The Manhunt action feed (bottom-left, last 5 important actions) requires no separate setup and appears automatically during rounds.
 
@@ -54,10 +58,9 @@ RemotePlayerTemplate
 
 ## TODO (future gameplay)
 
-- Tickets system
-- Shop economy
+- Shop economy and account-backed persistence
 - Arcade machine interactions that launch mini-games
-- Server-authoritative Manhunt/Hide & Seek synchronization
+- Production trusted map config for Manhunt/Hide & Seek
 
 ## Ticket Economy (Prototype)
 - Add `TicketPickupManager` and `TicketLeaderboard` scripts to your NetworkManager or GameModeManager entity.
