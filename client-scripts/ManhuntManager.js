@@ -1,4 +1,4 @@
-/* global pc, document */
+/* global pc, document, window */
 
 var ManhuntManager = pc.createScript("manhuntManager");
 
@@ -10,6 +10,7 @@ ManhuntManager.attributes.add("safeZoneRadius", { type: "number", default: 15, m
 ManhuntManager.attributes.add("mainCameraEntity", { type: "entity", title: "Main Camera Entity" });
 ManhuntManager.attributes.add("spectatorCameraEntity", { type: "entity", title: "Spectator Camera Entity" });
 ManhuntManager.attributes.add("tagSfxEntity", { type: "entity", title: "Tag SFX Entity (optional)" });
+ManhuntManager.attributes.add("tagPromptDistance", { type: "number", default: 2.2, min: 0, title: "Tag Prompt Distance" });
 
 ManhuntManager.prototype.initialize = function () {
   this.networkClient = this._resolveScript(this.networkManagerEntity, "arcadeNetworkClient");
@@ -26,6 +27,9 @@ ManhuntManager.prototype.initialize = function () {
   this._spectatorActive = false;
   this._hiddenVisuals = [];
   this._lastLoggedPhase = "";
+  this._tagPromptKey = "manhunt-tag";
+  this._tagPrompt = window.ArcadeInteractionPrompt || null;
+  this._clientTagDistance = Math.max(this.tagPromptDistance || 2.2, 0);
   this._layers = this._createUiLayers();
 
   if (this.spectatorCameraEntity) this.spectatorCameraEntity.enabled = false;
@@ -37,6 +41,7 @@ ManhuntManager.prototype.initialize = function () {
 
 ManhuntManager.prototype.update = function (dt) {
   this._checkStartInput();
+  this._updateTagPrompt();
   this._checkTagInput();
   this._checkScoreboardInput();
   this._checkPositionCaptureInput();
@@ -163,9 +168,12 @@ ManhuntManager.prototype._checkStartInput = function () {
 
 ManhuntManager.prototype._checkTagInput = function () {
   if (!this.app.keyboard || !this.app.keyboard.wasPressed(pc.KEY_E)) return;
+  if (window.ArcadeDomInput && window.ArcadeDomInput.isTyping && window.ArcadeDomInput.isTyping()) return;
 
   var snapshot = this.getSnapshot();
-  if (snapshot.state !== "activeRound" || !snapshot.localPlayer || snapshot.localPlayer.manhuntTeam !== "seeker") return;
+  if (!this._canLocalTag(snapshot)) return;
+  if (!this._hasNearbyActiveHider(snapshot)) return;
+  if (this._tagPrompt && !this._tagPrompt.consumeAction(this._tagPromptKey)) return;
 
   if (!this.networkClient || !this.networkClient.sendManhuntTagRequest) {
     this._showFeedback("Connect to the server to tag hiders.", 1.5);
@@ -174,6 +182,38 @@ ManhuntManager.prototype._checkTagInput = function () {
 
   console.log("[Manhunt] sending authoritative tag request");
   this.networkClient.sendManhuntTagRequest();
+};
+
+ManhuntManager.prototype._updateTagPrompt = function () {
+  if (!this._tagPrompt) this._tagPrompt = window.ArcadeInteractionPrompt || null;
+  if (!this._tagPrompt) return;
+  var snapshot = this.getSnapshot();
+  if (this._canLocalTag(snapshot) && this._hasNearbyActiveHider(snapshot)) {
+    this._tagPrompt.show(this._tagPromptKey, "Press E to Tag", 50);
+  } else {
+    this._tagPrompt.hide(this._tagPromptKey);
+  }
+};
+
+ManhuntManager.prototype._canLocalTag = function (snapshot) {
+  return !!(snapshot && snapshot.state === "activeRound" && snapshot.localPlayer && snapshot.localPlayer.manhuntTeam === "seeker" && snapshot.localPlayer.manhuntStatus === "active");
+};
+
+ManhuntManager.prototype._hasNearbyActiveHider = function (snapshot) {
+  var localEntity = this._getLocalPlayerEntity();
+  if (!localEntity || !snapshot || !snapshot.players) return false;
+  var localPos = localEntity.getPosition();
+  var maxDistance = this._clientTagDistance;
+  for (var sessionId in snapshot.players) {
+    if (!Object.prototype.hasOwnProperty.call(snapshot.players, sessionId)) continue;
+    var player = snapshot.players[sessionId];
+    if (!player || player.manhuntTeam !== "hider" || player.manhuntStatus !== "active") continue;
+    var dx = localPos.x - (player.x || 0);
+    var dy = localPos.y - (player.y || 0);
+    var dz = localPos.z - (player.z || 0);
+    if (Math.sqrt(dx * dx + dy * dy + dz * dz) <= maxDistance) return true;
+  }
+  return false;
 };
 
 ManhuntManager.prototype._checkScoreboardInput = function () {
@@ -679,6 +719,7 @@ ManhuntManager.prototype._validateSetup = function () {
 };
 
 ManhuntManager.prototype._onDestroy = function () {
+  if (this._tagPrompt) this._tagPrompt.hide(this._tagPromptKey);
   for (var i = 0; i < this._tagParticles.length; i++) {
     if (this._tagParticles[i] && this._tagParticles[i].entity) this._tagParticles[i].entity.destroy();
   }

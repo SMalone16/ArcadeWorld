@@ -12,6 +12,9 @@ Upload/copy these files from repo folder `client-scripts/`:
 - `PlayerAppearance.js`
 - `PregameOverlay.js`
 - `NetworkDebugOverlay.js`
+- `InteractionPrompt.js`
+- `TicketSnakeGame.js`
+- `ArcadeCabinetGameLauncher.js`
 - `ManhuntManager.js`
 - `ManhuntMapConfig.js`
 - `TicketPickupManager.js`
@@ -151,7 +154,35 @@ RemotePlayerTemplate
 - Replace placeholder avatars with student-customizable characters.
 - Add production cabinet interactions, shop logic, and persistent account-backed ticket balances.
 
-## 6) Manhunt / Hide-and-Seek multiplayer setup
+
+## 6) Shared interaction prompt and Ticket Snake cabinet
+
+The centered prompt is DOM-based and reused by cabinet play and Manhunt tagging. It does not block input (`pointer-events: none`) and is automatically hidden during onboarding/pregame UI and while the Ticket Snake overlay is active.
+
+1. Upload these scripts with the rest of the client scripts:
+   - `InteractionPrompt.js`
+   - `TicketSnakeGame.js`
+   - `ArcadeCabinetGameLauncher.js`
+2. Attach `InteractionPrompt.js` once to an always-enabled entity such as `GameModeManager` or `NetworkManager`. No art assets are required.
+3. Select your arcade cabinet entity, or create an empty helper entity positioned at the cabinet. Attach `ArcadeCabinetGameLauncher.js`.
+4. In `ArcadeCabinetGameLauncher` attributes:
+   - Set `networkManagerEntity` to the entity running `ArcadeNetworkClient.js`.
+   - Set `localPlayerEntity` to `LocalPlayer`.
+   - Leave `cabinetEntity` empty if the script is on the cabinet; otherwise assign the actual cabinet entity.
+   - Start with `interactionRadius=2.5`. Increase slightly if the prompt feels hard to trigger.
+   - Leave `promptText` as `Press E to Play` unless you want classroom-specific wording.
+5. Test the cabinet:
+   - Join through the pregame UI so Arcade World is in `playing`.
+   - Walk away from the cabinet and confirm no prompt is visible.
+   - Walk within the radius and confirm the centered `Press E to Play` prompt appears around the lower-middle of the viewport.
+   - Press **E**. Ticket Snake should open over the current PlayCanvas scene without changing scenes or loading assets.
+   - Press **Space** to start, steer with **WASD** or **Arrow Keys**, crash into a wall/self to end, then press **E** to return to the same scene.
+6. Ticket rewards:
+   - The client displays the expected Ticket Snake reward from the score bands: 0 = 1, 1–2 = 2, 3–4 = 4, 5–7 = 6, 8–11 = 8, 12+ = 10.
+   - The client sends `tickets:awardFromMiniGame` with `{ source: "ticket-snake", score, tickets }`.
+   - The Colyseus server verifies the player exists, floors and clamps the award to 1–10, increments `player.tickets`, and replies with `tickets:miniGameAwarded`. Existing ticket leaderboard/local saved-ticket callbacks then refresh from room state.
+
+## 7) Manhunt / Hide-and-Seek multiplayer setup
 
 Manhunt uses a hybrid classroom-playtest model: local movement is client-authoritative for smooth feel, while the Colyseus room remains authoritative for round phase, team assignments, safe/tagged status, points, rule validation, and explicit server teleports. PlayCanvas clients send movement snapshots for server-side Manhunt checks and render synchronized state from the room schema.
 
@@ -186,7 +217,7 @@ Manhunt uses a hybrid classroom-playtest model: local movement is client-authori
 - Each `PlayerState` includes `manhuntTeam`, `manhuntStatus`, `manhuntPoints`, `totalPoints`, `isInManhuntRound`, and `serverTeleportId`.
 - Clients send:
   - `manhunt:startRequest` when the player presses **M** at Home Base during lobby/free roam.
-  - `manhunt:tagRequest` when a seeker presses **E** during `activeRound`.
+  - `manhunt:tagRequest` when a seeker presses **E** during `activeRound`. The centered `Press E to Tag` prompt is client-side only; the server remains authoritative for whether the tag is allowed.
   - `debug:playerPositionCapture` when a player presses **P** to print the local player root position in the server terminal.
 - The server validates player count, Home Base distance, seeker/hider roles, tag distance, safe-zone entry, scoring, movement locks, and round reset.
 - The server owns the real Home Base validation and the real Manhunt spawn destinations. For dev/classroom playtests, `ManhuntMapConfig.js` can send editor marker positions before a round starts; if that bridge is disabled or no config arrives, the server falls back to its hardcoded defaults.
@@ -251,7 +282,7 @@ Production note: this client-sent bridge is intentionally convenient for develop
 
 - Gather at Home Base / the safe zone, then press **M** to request a server-authoritative Manhunt round.
 - Pressing **M** outside Home Base shows "Go to Home Base to start Manhunt" locally, and the server also rejects invalid starts.
-- Press **E** as a seeker during `activeRound` to ask the server to tag the nearest active hider within range.
+- Press **E** as a seeker during `activeRound` to ask the server to tag the nearest active hider within range. A seeker sees the shared centered `Press E to Tag` prompt only when they are active and close to an active hider; hiders and out-of-range seekers do not see it. `ManhuntManager.tagPromptDistance` defaults to `2.2` to mirror the server tag range, but the server still validates every tag request.
 - Press **F** to toggle the Manhunt scoreboard overlay. It also opens automatically during `roundOver`.
 - Press **P** while standing at an intended Manhunt marker to capture the local player root position. The client sends `debug:playerPositionCapture`, and the server logs `[ManhuntDebug] Position capture from ...: x, y, z`. This is still useful for debugging player-root Y values.
 - Press **O** to resend/log `ManhuntMapConfig.js` marker positions while Manhunt is in the `lobby` phase.

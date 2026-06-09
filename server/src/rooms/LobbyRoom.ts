@@ -27,6 +27,11 @@ type TicketCollectRequestMessage = {
   ticketId?: string;
   playerPosition?: Vec3 | null;
 };
+type MiniGameTicketAwardMessage = {
+  source?: string;
+  score?: number;
+  tickets?: number;
+};
 
 const TICKET_SPAWN_COUNT = 16;
 const TICKET_ACTIVE_COUNT = 10;
@@ -34,6 +39,8 @@ const TICKET_COLLECT_DISTANCE = 2.5;
 const TICKET_COLLECT_VERTICAL_TOLERANCE = 3;
 const TICKET_RESPAWN_MIN_MS = 5000;
 const TICKET_RESPAWN_MAX_MS = 10000;
+const MINI_GAME_MIN_TICKETS = 1;
+const MINI_GAME_MAX_TICKETS = 10;
 
 type ManhuntMapConfigMessage = {
   safeZone?: (Vec3 & { radius?: number }) | null;
@@ -232,6 +239,13 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
       "tickets:collectRequest",
       (client, message: TicketCollectRequestMessage) => {
         this.handleTicketCollectRequest(client, message);
+      },
+    );
+
+    this.onMessage(
+      "tickets:awardFromMiniGame",
+      (client, message: MiniGameTicketAwardMessage) => {
+        this.handleMiniGameTicketAward(client, message);
       },
     );
 
@@ -1176,6 +1190,51 @@ export class LobbyRoom extends Room<ArcadeWorldState> {
       if (ticket.active) count += 1;
     });
     return count;
+  }
+
+  private handleMiniGameTicketAward(
+    client: Client,
+    message: MiniGameTicketAwardMessage,
+  ): void {
+    const player = this.state.players.get(client.sessionId);
+    if (!player) {
+      client.send("tickets:miniGameAwarded", {
+        accepted: false,
+        reason: "missing-player",
+        source: message?.source || "unknown",
+        score: 0,
+        ticketsAwarded: 0,
+        totalTickets: 0,
+      });
+      return;
+    }
+
+    const score = Number.isFinite(message?.score)
+      ? Math.max(0, Math.floor(message.score as number))
+      : 0;
+    const requestedTickets = Number.isFinite(message?.tickets)
+      ? Math.floor(message.tickets as number)
+      : MINI_GAME_MIN_TICKETS;
+    const ticketsAwarded = Math.max(
+      MINI_GAME_MIN_TICKETS,
+      Math.min(MINI_GAME_MAX_TICKETS, requestedTickets),
+    );
+    const source = typeof message?.source === "string" && message.source.trim()
+      ? message.source.trim().slice(0, 40)
+      : "unknown-mini-game";
+
+    player.tickets += ticketsAwarded;
+    console.log(
+      `[Tickets] Mini-game award: ${this.playerLabel(client.sessionId)} source=${source} ` +
+        `score=${score} tickets=${ticketsAwarded} total=${player.tickets}`,
+    );
+    client.send("tickets:miniGameAwarded", {
+      accepted: true,
+      source,
+      score,
+      ticketsAwarded,
+      totalTickets: player.tickets,
+    });
   }
 
   private handleTicketCollectRequest(
