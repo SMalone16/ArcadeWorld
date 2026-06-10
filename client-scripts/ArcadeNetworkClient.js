@@ -681,6 +681,21 @@ ArcadeNetworkClient.prototype.getRemotePlayerCount = function () {
   return count;
 };
 
+ArcadeNetworkClient.prototype.getActivePlayerCount = function () {
+  var count = 0;
+  for (var sessionId in this._knownPlayers) {
+    if (Object.prototype.hasOwnProperty.call(this._knownPlayers, sessionId)) {
+      count += 1;
+    }
+  }
+
+  if (count === 0 && (this.getLocalPlayerEntity() || this._isOfflineMode === true || this.sessionId)) {
+    return 1;
+  }
+
+  return count;
+};
+
 
 ArcadeNetworkClient.prototype.getManhuntState = function () {
   var manhunt = this.room && this.room.state ? this.room.state.manhunt : null;

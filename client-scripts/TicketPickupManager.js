@@ -9,8 +9,9 @@ TicketPickupManager.attributes.add("collectVerticalTolerance", { type: "number",
 TicketPickupManager.attributes.add("collectSfx", { type: "asset", assetType: "audio" });
 TicketPickupManager.attributes.add("showDebugOverlay", {
     type: "boolean",
-    default: true,
-    title: "Show Ticket Debug Overlay"
+    default: false,
+    title: "Show Ticket Debug Overlay",
+    description: "Legacy editor flag. The overlay starts hidden; press 2 to toggle it during playtests."
 });
 
 TicketPickupManager.prototype.initialize = function () {
@@ -25,7 +26,7 @@ TicketPickupManager.prototype.initialize = function () {
     this._lastSpawnSendResult = "not attempted";
     this._lastWarning = "";
     this._debugOverlay = null;
-    this._debugEnabled = this.showDebugOverlay === true;
+    this._debugEnabled = false;
     this._lastServerSpawnAck = null;
     this._lastCollectDebug = null;
     this._lastCollectRequest = null;
@@ -422,7 +423,7 @@ TicketPickupManager.prototype._updateDebugOverlay = function () {
         return;
     }
 
-    var shouldShow = (this._debugEnabled && this.showDebugOverlay) || !!this._debugSnapshotMessage;
+    var shouldShow = this._debugEnabled || !!this._debugSnapshotMessage;
     if (!shouldShow) {
         this._removeDebugOverlay();
         return;
