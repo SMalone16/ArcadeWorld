@@ -10,7 +10,8 @@ These scripts are designed to be copied/uploaded into your **existing PlayCanvas
 - `RemotePlayerManager.js` - creates/updates/removes remote avatars and DOM nametags
 - `PlayerAppearance.js` - shared helper/script for body color and hat selection
 - `PregameOverlay.js` - DOM pre-game profile picker for name, body color, and hat
-- `NetworkDebugOverlay.js` - temporary DOM overlay for multiplayer playtests
+- `DebugUiToggle.js` - shared global `2`/`F8` toggle for developer-only debug overlays
+- `NetworkDebugOverlay.js` - temporary DOM overlay for multiplayer playtests, hidden by default
 - `InteractionPrompt.js` - reusable centered DOM prompt for contextual **E** actions such as arcade cabinets and Manhunt tags
 - `TicketSnakeGame.js` - vanilla DOM/canvas Ticket Snake overlay mini-game; no PlayCanvas scene switch or extra assets
 - `ArcadeCabinetGameLauncher.js` - distance-based arcade cabinet launcher that opens Ticket Snake and sends ticket awards through the network client
@@ -34,7 +35,7 @@ These scripts are designed to be copied/uploaded into your **existing PlayCanvas
 1. Add the Colyseus JS client library to your PlayCanvas project.
 2. Update `ArcadeConfig.js` with your Codespaces forwarded URL in `wss://...` format.
 3. Attach scripts exactly as documented in `docs/PLAYCANVAS_SETUP.md`.
-4. During multi-screen tests, add `NetworkDebugOverlay.js` to the same NetworkManager entity so each client reports its connection/session/remote-visibility state on screen.
+4. During multi-screen tests, attach `DebugUiToggle.js` once to an always-enabled manager and add `NetworkDebugOverlay.js` to the same NetworkManager entity. Developer-only Network Debug and Ticket Debug panels stay hidden by default; press `2` to toggle both together (`F8` is a backup).
 5. For the pre-game flow, attach `PregameOverlay.js` to a `PregameUI` entity, set `PregameOverlay.networkClientEntity` to `NetworkManager`, and set `ArcadeNetworkClient.autoConnect=false`.
 6. For centered prompts, attach `InteractionPrompt.js` once to `GameModeManager`, `NetworkManager`, or another always-enabled entity.
 7. For a cabinet mini-game, upload `TicketSnakeGame.js` and `ArcadeCabinetGameLauncher.js`, then attach `ArcadeCabinetGameLauncher.js` to a cabinet entity (or manager) and assign `networkManagerEntity`, `localPlayerEntity`, and optionally `cabinetEntity`.
@@ -42,6 +43,7 @@ These scripts are designed to be copied/uploaded into your **existing PlayCanvas
 9. Optional tag sound setup: assign `ManhuntManager.tagSfxEntity` to an entity that has a **Sound** component and a sound slot named `tagPop`. If this entity/slot is not assigned, tag SFX is skipped safely.
 10. The Manhunt action feed (bottom-left, last 5 important actions) requires no separate setup and appears automatically during rounds.
 11. For the default student free-roam HUD, upload `FreeRoamStatusHud.js`, attach it once to `NetworkManager` or `GameModeManager`, assign `networkManagerEntity` to the entity running `ArcadeNetworkClient.js`, and leave `showDuringManhunt=false` for normal classroom play.
+12. Keep developer overlays separate from student HUDs: Sprint HUD, Manhunt HUD, interaction prompts, and `FreeRoamStatusHud.js` are gameplay UI, while Network Debug and Ticket Debug are hidden developer tools controlled by `DebugUiToggle.js`.
 
 ## Pre-game customization setup
 
@@ -89,4 +91,6 @@ RemotePlayerTemplate
 - Assign `networkManagerEntity`, `localPlayerEntity`, `ticketSpawnRoot`, `ticketTemplate`, `collectRadius` and optional `collectSfx`.
 - Ticket totals are prototype-persisted via `localStorage` per browser/device.
 - The student-facing free-roam HUD is visible by default during normal play and shows only `Tickets` and `Players`; it hides during onboarding/pregame UI, mini-game overlays, and non-lobby Manhunt phases unless `showDuringManhunt=true`.
-- The ticket debug overlay is hidden by default and does not appear automatically on launch. Press `2` to toggle the in-game ticket debug overlay (`F8` remains available as a backup toggle). Press `T` to log a ticket debug snapshot to the browser console and show an on-screen confirmation/overlay with nearest authoritative ticket, nearest visual clone, and recent collection request/rejection details.
+- Network Debug and Ticket Debug overlays are hidden by default and do not appear automatically on launch or after joining a room. Press `2` to toggle both developer panels together through the shared `window.ArcadeDebugUi` state (`F8` remains available as a backup toggle). The panels remain hidden during onboarding/pregame and while Ticket Snake or another mini-game overlay is active; if debug mode is still enabled, they can reappear after normal play resumes.
+- Press `T` to log a ticket debug snapshot to the browser console only. It does not permanently enable the Ticket Debug panel; press `2` when you need to view nearest authoritative ticket, nearest visual clone, and recent collection request/rejection details on screen.
+- For student-facing free-roam info, use the clean `FreeRoamStatusHud.js` Tickets/Players HUD instead of developer debug overlays.

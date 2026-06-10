@@ -27,7 +27,7 @@ NetworkDebugOverlay.prototype.initialize = function () {
   this._timer = 0;
   this._networkClient = null;
   this._remotePlayerManager = null;
-  this._root = this._createRootElement();
+  this._root = null;
 
   this._resolveScripts();
   this._render();
@@ -80,6 +80,15 @@ NetworkDebugOverlay.prototype._createRootElement = function () {
 };
 
 NetworkDebugOverlay.prototype._render = function () {
+  if (!this._shouldShowDebugOverlay()) {
+    this._removeRootElement();
+    return;
+  }
+
+  if (!this._root) {
+    this._root = this._createRootElement();
+  }
+
   var snapshot = this._getSnapshot();
   var remotePlayersVisible = this._getRemotePlayersVisible(snapshot);
   var lastNetworkError = snapshot.lastNetworkError || "none";
@@ -93,6 +102,18 @@ NetworkDebugOverlay.prototype._render = function () {
     "Last network error: " + lastNetworkError,
     "Server URL: " + (snapshot.serverUrl || "none")
   ].join("\n");
+};
+
+NetworkDebugOverlay.prototype._shouldShowDebugOverlay = function () {
+  if (typeof window === "undefined" || !window.ArcadeDebugUi) {
+    return false;
+  }
+
+  if (window.ArcadeDebugUi.shouldShow) {
+    return window.ArcadeDebugUi.shouldShow();
+  }
+
+  return window.ArcadeDebugUi.isEnabled && window.ArcadeDebugUi.isEnabled();
 };
 
 NetworkDebugOverlay.prototype._getSnapshot = function () {
@@ -118,8 +139,13 @@ NetworkDebugOverlay.prototype._getRemotePlayersVisible = function (snapshot) {
   return snapshot.remotePlayersKnown || 0;
 };
 
-NetworkDebugOverlay.prototype._onDestroy = function () {
+NetworkDebugOverlay.prototype._removeRootElement = function () {
   if (this._root && this._root.parentNode) {
     this._root.parentNode.removeChild(this._root);
   }
+  this._root = null;
+};
+
+NetworkDebugOverlay.prototype._onDestroy = function () {
+  this._removeRootElement();
 };

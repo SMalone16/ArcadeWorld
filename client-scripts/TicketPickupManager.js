@@ -26,7 +26,6 @@ TicketPickupManager.prototype.initialize = function () {
     this._lastSpawnSendResult = "not attempted";
     this._lastWarning = "";
     this._debugOverlay = null;
-    this._debugEnabled = false;
     this._lastServerSpawnAck = null;
     this._lastCollectDebug = null;
     this._lastCollectRequest = null;
@@ -423,7 +422,7 @@ TicketPickupManager.prototype._updateDebugOverlay = function () {
         return;
     }
 
-    var shouldShow = this._debugEnabled || !!this._debugSnapshotMessage;
+    var shouldShow = this._shouldShowDebugOverlay();
     if (!shouldShow) {
         this._removeDebugOverlay();
         return;
@@ -461,7 +460,7 @@ TicketPickupManager.prototype._updateDebugOverlay = function () {
 
     var lines = [];
     lines.push("[Ticket Debug]");
-    lines.push("Keys: 2 toggle overlay (F8 backup), T log console snapshot + show this overlay");
+    lines.push("Keys: 2 toggle debug overlays (F8 backup), T log console snapshot");
     if (this._debugSnapshotMessage) {
         lines.push(this._debugSnapshotMessage);
     }
@@ -515,6 +514,18 @@ TicketPickupManager.prototype._removeDebugOverlay = function () {
     this._debugOverlay = null;
 };
 
+TicketPickupManager.prototype._shouldShowDebugOverlay = function () {
+    if (typeof window === "undefined" || !window.ArcadeDebugUi) {
+        return false;
+    }
+
+    if (window.ArcadeDebugUi.shouldShow) {
+        return window.ArcadeDebugUi.shouldShow();
+    }
+
+    return window.ArcadeDebugUi.isEnabled && window.ArcadeDebugUi.isEnabled();
+};
+
 TicketPickupManager.prototype._isDebugKeyInputElement = function (target) {
     if (!target) {
         return false;
@@ -530,17 +541,6 @@ TicketPickupManager.prototype._isDebugKeyInputElement = function (target) {
 
 TicketPickupManager.prototype._onDebugKeyDown = function (evt) {
     if (!evt || evt.repeat || this._isDebugKeyInputElement(evt.target)) {
-        return;
-    }
-
-    var isDigit2 = evt.key === "2" || evt.code === "Digit2";
-    if (isDigit2 || evt.key === "F8") {
-        this._debugEnabled = !this._debugEnabled;
-        if (isDigit2) {
-            console.log("[Tickets] Debug overlay toggled by 2 key: " + this._debugEnabled);
-        } else {
-            console.log("[Tickets] Debug overlay toggled by F8 key: " + this._debugEnabled);
-        }
         return;
     }
 
@@ -569,7 +569,6 @@ TicketPickupManager.prototype._onDebugKeyDown = function (evt) {
             lastCollectDebug: this._lastCollectDebug
         };
         console.log("[Tickets] Debug snapshot", snapshot);
-        this._debugEnabled = true;
         this._debugSnapshotMessage = "Debug snapshot logged to console at " + new Date().toLocaleTimeString();
         this._updateDebugOverlay();
     }
