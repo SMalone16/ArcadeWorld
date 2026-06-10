@@ -31,7 +31,7 @@ npm run dev
 
 ### Connection and movement
 
-- [ ] Both clients show `Connected: yes` in `NetworkDebugOverlay`.
+- [ ] Debug overlays are hidden by default; press `2` and both clients show `Connected: yes` in `NetworkDebugOverlay`, then press `2` again to hide developer panels.
 - [ ] Each client has a unique `Session ID`.
 - [ ] Both clients show the same room name, `arcade_lobby`.
 - [ ] Each client can move with WASD, look with mouse, sprint with Shift, and jump with Space.

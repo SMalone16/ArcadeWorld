@@ -11,6 +11,7 @@ Upload/copy these files from repo folder `client-scripts/`:
 - `RemotePlayerManager.js`
 - `PlayerAppearance.js`
 - `PregameOverlay.js`
+- `DebugUiToggle.js`
 - `NetworkDebugOverlay.js`
 - `InteractionPrompt.js`
 - `TicketSnakeGame.js`
@@ -81,7 +82,7 @@ For local server use `ws://localhost:2567`.
 1. Create an empty entity (example: `NetworkManager`).
 2. Attach `ArcadeNetworkClient.js` script.
 3. Attach `RemotePlayerManager.js` script.
-4. Attach `NetworkDebugOverlay.js` script while running multiplayer playtests. Remove or disable it when you no longer need debug text.
+4. Attach `DebugUiToggle.js` once to `NetworkManager` or another always-enabled manager, then attach `NetworkDebugOverlay.js` while running multiplayer playtests. Network Debug and Ticket Debug are developer-only panels, hidden by default, and both read the shared `window.ArcadeDebugUi` state. Press **2** to show/hide both panels together (`F8` remains a backup toggle). Remove or disable `NetworkDebugOverlay.js` when you no longer need network debug text.
 5. In `ArcadeNetworkClient` attributes:
    - set `serverUrl` (or keep empty and provide `window.ArcadeConfig.SERVER_URL`).
    - set `roomName` (or keep empty and provide `window.ArcadeConfig.ROOM_NAME`).
@@ -97,7 +98,7 @@ For local server use `ws://localhost:2567`.
    - set `networkClientEntity` to this same `NetworkManager` entity.
    - set `remotePlayerManagerEntity` to this same `NetworkManager` entity.
 
-The overlay should display `Connected`, `Session ID`, `Room name`, `Remote players visible`, `Last network error`, and `Server URL`. If both clients show `Connected: yes` but `Remote players visible: 0`, the room is live but remote spawn/update handling still needs investigation.
+The overlay starts hidden and should not appear at launch, during onboarding/pregame, or while Ticket Snake/another mini-game overlay is active. Press **2** after normal play starts to display `Connected`, `Session ID`, `Room name`, `Remote players visible`, `Last network error`, and `Server URL`; press **2** again to hide it. If both clients show `Connected: yes` but `Remote players visible: 0`, the room is live but remote spawn/update handling still needs investigation.
 
 ### D) Level colliders (walls/floor)
 
@@ -305,4 +306,13 @@ Production note: this client-sent bridge is intentionally convenient for develop
 5. Wire `FreeRoamStatusHud.networkManagerEntity` to the entity running `ArcadeNetworkClient.js`, leave `showDuringManhunt=false`, and keep the default `hudZIndex` unless another UI needs to layer above it.
 6. Optional: add `TicketCollectibleVisual` on the ticket template for bob/rotation.
 7. Launch the game and confirm the student-facing free-roam HUD shows a clean `Tickets` / `Players` display during normal play. It hides during onboarding/pregame UI, mini-game overlays, and non-lobby Manhunt phases unless `showDuringManhunt=true`.
-8. Confirm the ticket debug overlay does **not** appear automatically. Press **2** to show it, then press **2** again to hide it (`F8` remains a backup toggle). Press **T** to log a ticket debug snapshot to the browser console and show/update an on-screen line; the overlay includes the nearest authoritative ticket, nearest visual clone, collection distances/tolerances, and recent request/success/rejection details.
+8. Confirm Network Debug and Ticket Debug do **not** appear automatically. Press **2** to show both developer overlays, then press **2** again to hide both (`F8` remains a backup toggle). Pressing **2** is ignored while typing in inputs/textareas/selects/contenteditable UI. Press **T** to log a ticket debug snapshot to the browser console only; it should not make the Ticket Debug UI appear permanently. When the shared debug UI is enabled and normal play is active, the Ticket Debug overlay includes the nearest authoritative ticket, nearest visual clone, collection distances/tolerances, and recent request/success/rejection details.
+
+## Developer Debug UI
+
+- `DebugUiToggle.js` owns the single global `window.ArcadeDebugUi` state for developer overlays. Upload it with the client scripts and attach it once to `NetworkManager` or `GameModeManager`.
+- Debug overlays are hidden by default for a clean student view. Press **2** to toggle Network Debug and Ticket Debug together. **F8** remains a backup toggle.
+- The **2** toggle is ignored while the player is typing in DOM controls.
+- Debug overlays stay hidden during onboarding/pregame and while Ticket Snake or another mini-game overlay is active. If global debug mode remains enabled, they may reappear after returning to normal play.
+- Press **T** to log a Ticket Debug snapshot to the browser console only; use **2** when you intentionally want the on-screen Ticket Debug panel.
+- Do not use Network Debug or Ticket Debug as student-facing UI. Use `FreeRoamStatusHud.js` for clean Tickets/Players free-roam information, and leave Sprint HUD, Manhunt HUD, and interaction prompts as gameplay UI.

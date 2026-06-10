@@ -31,7 +31,8 @@ These files are plain JavaScript because they are uploaded to PlayCanvas Editor 
 - `ManhuntManager.js` renders Manhunt HUD layers, sends start/tag/debug requests, handles spectator/camera behavior, and plays optional tag feedback.
 - `ManhuntMapConfig.js` sends PlayCanvas marker positions to the server while in the lobby phase. This is a development/classroom bridge, not production-trusted map loading.
 - `TicketPickupManager.js`, `TicketLeaderboard.js`, and `TicketCollectibleVisual.js` implement the free-roam ticket pickup prototype UI/visuals around server-owned ticket state.
-- `NetworkDebugOverlay.js` renders connection/session/remote-visibility diagnostics for playtests.
+- `DebugUiToggle.js` owns one shared `window.ArcadeDebugUi` state so developer overlays stay hidden by default and toggle together with `2`/backup `F8`.
+- `NetworkDebugOverlay.js` renders connection/session/remote-visibility diagnostics for playtests only when shared debug UI is visible.
 
 ## Server responsibilities (`server/`)
 
