@@ -16,7 +16,8 @@ These scripts are designed to be copied/uploaded into your **existing PlayCanvas
 - `ArcadeCabinetGameLauncher.js` - distance-based arcade cabinet launcher that opens Ticket Snake and sends ticket awards through the network client
 - `ManhuntManager.js` - PlayCanvas Manhunt UI/controller for the server-authoritative round state, tagging requests, centered tag prompts, safe-zone prompts, action feed feedback, spectator view, tag burst FX, and DOM HUD
 - `ManhuntMapConfig.js` - sends PlayCanvas marker positions to the server during the lobby phase for classroom/dev map setup
-- `TicketPickupManager.js` - clones ticket visuals, requests server-validated collection, and renders ticket debug information
+- `TicketPickupManager.js` - clones ticket visuals, requests server-validated collection, and renders opt-in ticket debug information
+- `FreeRoamStatusHud.js` - small student-facing DOM HUD showing local tickets and active lobby player count during free roam
 - `TicketLeaderboard.js` - shows the current room ticket standings
 - `TicketCollectibleVisual.js` - optional bob/rotation visual behavior for ticket templates
 
@@ -40,6 +41,7 @@ These scripts are designed to be copied/uploaded into your **existing PlayCanvas
 8. For Manhunt tests, attach `ManhuntManager.js` to `GameModeManager` or `NetworkManager`, then assign its network manager, remote player manager, local player, camera, spectator camera, tag SFX, and safe-zone attributes as needed. Press `M` in the lobby to start/reset; seekers see `Press E to Tag` only beside an active hider during `activeRound`, then **E** sends the existing server-authoritative tag request. `tagPromptDistance` defaults to `2.2`.
 9. Optional tag sound setup: assign `ManhuntManager.tagSfxEntity` to an entity that has a **Sound** component and a sound slot named `tagPop`. If this entity/slot is not assigned, tag SFX is skipped safely.
 10. The Manhunt action feed (bottom-left, last 5 important actions) requires no separate setup and appears automatically during rounds.
+11. For the default student free-roam HUD, upload `FreeRoamStatusHud.js`, attach it once to `NetworkManager` or `GameModeManager`, assign `networkManagerEntity` to the entity running `ArcadeNetworkClient.js`, and leave `showDuringManhunt=false` for normal classroom play.
 
 ## Pre-game customization setup
 
@@ -80,9 +82,11 @@ RemotePlayerTemplate
 - Production trusted map config for Manhunt/Hide & Seek
 
 ## Ticket Economy (Prototype)
-- Add `TicketPickupManager` and `TicketLeaderboard` scripts to your NetworkManager or GameModeManager entity.
+- Add `TicketPickupManager`, `FreeRoamStatusHud`, and optionally `TicketLeaderboard` scripts to your NetworkManager or GameModeManager entity.
+- For `FreeRoamStatusHud`, set `networkManagerEntity` to the entity running `ArcadeNetworkClient.js`, leave `showDuringManhunt=false`, and keep the default `hudZIndex` unless another UI must layer above it.
 - Create `TicketSpawnRoot` with exactly 16 enabled child transform markers.
 - Create a disabled `TicketTemplate` entity (with visuals/collider and optional `TicketCollectibleVisual`).
 - Assign `networkManagerEntity`, `localPlayerEntity`, `ticketSpawnRoot`, `ticketTemplate`, `collectRadius` and optional `collectSfx`.
 - Ticket totals are prototype-persisted via `localStorage` per browser/device.
-- Ticket debug controls: press `2` to toggle the in-game ticket debug overlay (`F8` remains available as a backup toggle). Press `T` to log a ticket debug snapshot to the browser console and show an on-screen confirmation/overlay with nearest authoritative ticket, nearest visual clone, and recent collection request/rejection details.
+- The student-facing free-roam HUD is visible by default during normal play and shows only `Tickets` and `Players`; it hides during onboarding/pregame UI, mini-game overlays, and non-lobby Manhunt phases unless `showDuringManhunt=true`.
+- The ticket debug overlay is hidden by default and does not appear automatically on launch. Press `2` to toggle the in-game ticket debug overlay (`F8` remains available as a backup toggle). Press `T` to log a ticket debug snapshot to the browser console and show an on-screen confirmation/overlay with nearest authoritative ticket, nearest visual clone, and recent collection request/rejection details.

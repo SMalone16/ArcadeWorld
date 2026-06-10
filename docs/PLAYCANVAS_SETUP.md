@@ -18,6 +18,7 @@ Upload/copy these files from repo folder `client-scripts/`:
 - `ManhuntManager.js`
 - `ManhuntMapConfig.js`
 - `TicketPickupManager.js`
+- `FreeRoamStatusHud.js`
 - `TicketLeaderboard.js`
 - `TicketCollectibleVisual.js`
 
@@ -299,7 +300,9 @@ Production note: this client-sent bridge is intentionally convenient for develop
 ## Ticket Pickup Setup (Free Roam)
 1. Create `TicketSpawnRoot` with **exactly 16 enabled child transforms** for ticket spawn candidates.
 2. Create a disabled `TicketTemplate` entity to clone at runtime.
-3. Attach `TicketPickupManager` and `TicketLeaderboard` to your NetworkManager/GameModeManager.
-4. Wire script attributes: network manager, local player, spawn root, template, collect radius, optional collect SFX asset.
-5. Optional: add `TicketCollectibleVisual` on the ticket template for bob/rotation.
-6. During ticket playtests, press **2** to toggle the ticket debug overlay (`F8` remains a backup toggle). Press **T** to log a ticket debug snapshot to the browser console and show/update an on-screen line; the overlay includes the nearest authoritative ticket, nearest visual clone, collection distances/tolerances, and recent request/success/rejection details.
+3. Attach `TicketPickupManager`, `FreeRoamStatusHud`, and optionally `TicketLeaderboard` to your NetworkManager/GameModeManager.
+4. Wire `TicketPickupManager` attributes: network manager, local player, spawn root, template, collect radius, optional collect SFX asset.
+5. Wire `FreeRoamStatusHud.networkManagerEntity` to the entity running `ArcadeNetworkClient.js`, leave `showDuringManhunt=false`, and keep the default `hudZIndex` unless another UI needs to layer above it.
+6. Optional: add `TicketCollectibleVisual` on the ticket template for bob/rotation.
+7. Launch the game and confirm the student-facing free-roam HUD shows a clean `Tickets` / `Players` display during normal play. It hides during onboarding/pregame UI, mini-game overlays, and non-lobby Manhunt phases unless `showDuringManhunt=true`.
+8. Confirm the ticket debug overlay does **not** appear automatically. Press **2** to show it, then press **2** again to hide it (`F8` remains a backup toggle). Press **T** to log a ticket debug snapshot to the browser console and show/update an on-screen line; the overlay includes the nearest authoritative ticket, nearest visual clone, collection distances/tolerances, and recent request/success/rejection details.
